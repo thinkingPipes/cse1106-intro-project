@@ -1,0 +1,21 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
+ 
+int main(void) {
+const char *fortunes[] = {
+"You will accidentally delete the production database.",
+"A semicolon will ruin your afternoon.",
+"Your code will work on the first try. Nobody will believe you.",
+"You will spend 3 hours debugging a typo.",
+"Git will save you from yourself today.",
+"The compiler knows your secrets.",
+"A mysterious segmentation fault approaches."
+};
+int count = sizeof(fortunes) / sizeof(fortunes[0]);
+srand((unsigned int)time(NULL));
+printf("=== Fortune Generator ===\n");
+printf("%s\n", fortunes[rand() % count]);
+ 
+return 0;
+}
