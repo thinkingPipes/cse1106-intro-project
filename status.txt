@@ -1,3 +1,4 @@
-Status: Initial project structure created.
-Application: Fortune Generator
-Build: gcc -Wall -Wextra -std=c11 src/main.c -o fortune
+Project: Raspberry Pi Equipment Health Monitor
+Status: Initial Linux health snapshot and optional CSV logging implemented.
+Build: gcc -Wall -Wextra -Wpedantic -std=c11 -Iinclude src/main.c src/monitor.c -o health-monitor
+Platform: Linux; Raspberry Pi thermal sensor support depends on sysfs availability.
