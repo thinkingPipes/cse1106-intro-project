@@ -1,0 +1,3 @@
+Status: Initial project structure created.
+Application: Fortune Generator
+Build: gcc -Wall -Wextra -std=c11 src/main.c -o fortune
