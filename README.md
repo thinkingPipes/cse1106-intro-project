@@ -1,11 +1,11 @@
 # Raspberry Pi Equipment Health Monitor
 
-A lightweight Linux monitor for memory and root-filesystem utilization. It reports `HEALTHY` or `WARNING` using one configurable utilization threshold, controls a physical warning LED on BCM GPIO 17, and can append each report to a CSV log.
+A lightweight Linux monitor for CPU, memory, and root-filesystem utilization. It reports `HEALTHY` or `WARNING`, controls a physical warning LED on BCM GPIO 17, and can append each report to a CSV log.
 
 ## Project structure
 
 - `src/main.c` — command-line options, continuous sampling, signal handling, and output coordination
-- `src/monitor.c` — memory and filesystem collection, status evaluation, and CSV logging
+- `src/monitor.c` — CPU, memory, and filesystem collection, status evaluation, and CSV logging
 - `src/gpio_indicator.c` — physical GPIO 17 LED control through libgpiod
 - `include/` — shared monitor and GPIO interfaces
 - `Makefile` — build configuration requiring libgpiod development files
@@ -26,13 +26,13 @@ Run continuously in the foreground. The default sampling interval is 5 seconds, 
 ./health-monitor
 ```
 
-Change the shared memory/storage warning threshold (default 80%) or sampling interval (1–3600 seconds):
+The RAM and root-filesystem threshold defaults to 70%. CPU has a separate 60% default. Set them independently; the first positional number is the RAM/storage threshold, and `--cpu-threshold` sets the CPU threshold. The sampling interval defaults to 5 seconds:
 
 ```sh
-./health-monitor 75 --interval 10
+./health-monitor 70 --cpu-threshold 85 --interval 10
 ```
 
-Append one CSV report per sample:
+CPU utilization is unavailable on the initial sample because it establishes a counter baseline; valid CPU percentages appear from the next sample onward. Append one CSV report per sample:
 
 ```sh
 ./health-monitor --log data/temperature_log.csv
@@ -60,4 +60,6 @@ Install the libgpiod development package before building. The process must have 
 
 ## Health threshold
 
-Memory use is calculated from `MemTotal` and `MemAvailable`; storage use is measured for the root filesystem. Either resource above the configured threshold produces `WARNING`; values at or below it produce `HEALTHY`. The threshold defaults to 80% and accepts integer values from 1 to 100. A resource exactly at the threshold does not trigger a warning. If both readings are unavailable, status is `UNKNOWN`.
+Memory use is calculated from `MemTotal` and `MemAvailable`; storage use is measured for the root filesystem. Either resource above the shared 70% default threshold produces `WARNING`. CPU utilization uses the aggregate `cpu` counters in `/proc/stat` and a separate 60% default threshold. A warning is raised only when a measured value is above its threshold. CPU counters are cumulative, so the first sample is a baseline; missing or invalid counter readings are not treated as zero. Both thresholds accept integer values from 1 to 100. If all three readings are unavailable, status is `UNKNOWN`.
+
+CSV output now includes CPU utilization and its threshold. Existing logs with the older header are left unchanged and rejected for appending; choose a new log filename when using the updated CSV format.

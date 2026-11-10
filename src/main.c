@@ -26,7 +26,8 @@ static void print_usage(const char *program)
     puts("Report Linux equipment health metrics.");
     puts("  --log FILE  Append this report to a CSV file");
     puts("  --interval  Seconds between reports (1-3600; default 5)");
-    puts("  THRESHOLD   Memory/storage warning threshold (integer 1-100; default 80)");
+    puts("  --cpu-threshold PCT  CPU warning threshold (integer 1-100; default 60)");
+    puts("  THRESHOLD   RAM/storage warning threshold (integer 1-100; default 70)");
     puts("  --help      Show this help message");
 }
 
@@ -86,9 +87,11 @@ static int wait_interval(unsigned int seconds)
 int main(int argc, char **argv)
 {
     const char *log_path = NULL;
-    unsigned int warning_threshold_pct = 80;
+    unsigned int warning_threshold_pct = 70;
+    unsigned int cpu_warning_threshold_pct = 60;
     unsigned int interval_seconds = 5;
     bool threshold_supplied = false;
+    bool cpu_threshold_supplied = false;
     bool interval_supplied = false;
     for (int i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "--help") == 0) {
@@ -107,6 +110,16 @@ int main(int argc, char **argv)
                 return 2;
             }
             interval_supplied = true;
+            continue;
+        }
+        if (strcmp(argv[i], "--cpu-threshold") == 0 && i + 1 < argc) {
+            if (cpu_threshold_supplied ||
+                parse_threshold(argv[++i], &cpu_warning_threshold_pct) != 0) {
+                fprintf(stderr,
+                        "Invalid CPU threshold: enter an integer from 1 to 100.\n");
+                return 2;
+            }
+            cpu_threshold_supplied = true;
             continue;
         }
         if (argv[i][0] != '-') {
@@ -152,9 +165,11 @@ int main(int argc, char **argv)
 
     printf("Monitoring continuously every %u seconds. Press Ctrl+C to stop.\n",
            interval_seconds);
+    CpuSampleState cpu_state = {0};
     while (!stop_requested) {
         HealthReport report;
-        collect_health_report(&report, warning_threshold_pct);
+        collect_health_report(&report, warning_threshold_pct,
+                              cpu_warning_threshold_pct, &cpu_state);
         print_health_report(&report);
         if (gpio_indicator_apply_status(&indicator, report.status, gpio_error,
                                         sizeof(gpio_error)) < 0) {
@@ -165,7 +180,14 @@ int main(int argc, char **argv)
                    report.status == HEALTH_WARNING ? "ON" : "OFF");
         }
         if (log_path != NULL && append_health_report(log_path, &report) != 0) {
-            fprintf(stderr, "Could not append report to %s\n", log_path);
+            if (errno == EINVAL) {
+                fprintf(stderr,
+                        "CSV file %s has an older or invalid header; choose a new log file for CPU columns.\n",
+                        log_path);
+                log_path = NULL;
+            } else {
+                fprintf(stderr, "Could not append report to %s\n", log_path);
+            }
             operation_failed = true;
         }
         if (stop_requested || wait_interval(interval_seconds) < 0) {

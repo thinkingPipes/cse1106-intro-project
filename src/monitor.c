@@ -2,12 +2,133 @@
 
 #include "health_monitor.h"
 
+#include <ctype.h>
 #include <errno.h>
+#include <limits.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/statvfs.h>
 #include <time.h>
+
+#define HEALTH_CSV_HEADER \
+    "timestamp_utc,memory_used_pct,root_used_pct,warning_threshold_pct," \
+    "cpu_used_pct,cpu_warning_threshold_pct,status"
+
+bool parse_cpu_stat_line(const char *line, uint64_t *total_ticks,
+                         uint64_t *idle_ticks)
+{
+    if (line == NULL || total_ticks == NULL || idle_ticks == NULL ||
+        strncmp(line, "cpu", 3) != 0 || !isspace((unsigned char)line[3])) {
+        return false;
+    }
+
+    unsigned long long counters[10] = {0};
+    size_t count = 0;
+    const char *cursor = line + 3;
+    while (*cursor != '\0' && count < 10) {
+        while (isspace((unsigned char)*cursor)) {
+            ++cursor;
+        }
+        if (*cursor == '\0') {
+            break;
+        }
+        if (!isdigit((unsigned char)*cursor)) {
+            return false;
+        }
+        errno = 0;
+        char *end = NULL;
+        unsigned long long value = strtoull(cursor, &end, 10);
+        if (errno == ERANGE || end == cursor ||
+            (*end != '\0' && !isspace((unsigned char)*end))) {
+            return false;
+        }
+        counters[count++] = value;
+        cursor = end;
+    }
+    while (isspace((unsigned char)*cursor)) {
+        ++cursor;
+    }
+    if (*cursor != '\0' || count < 4) {
+        return false;
+    }
+
+    uint64_t total = 0;
+    size_t total_fields = count < 8 ? count : 8;
+    for (size_t i = 0; i < total_fields; ++i) {
+        uint64_t value = (uint64_t)counters[i];
+        if (UINT64_MAX - total < value) {
+            return false;
+        }
+        total += value;
+    }
+    uint64_t idle = (uint64_t)counters[3];
+    if (count >= 5) {
+        uint64_t iowait = (uint64_t)counters[4];
+        if (UINT64_MAX - idle < iowait) {
+            return false;
+        }
+        idle += iowait;
+    }
+    if (total == 0 || idle > total) {
+        return false;
+    }
+    *total_ticks = total;
+    *idle_ticks = idle;
+    return true;
+}
+
+bool update_cpu_utilization(CpuSampleState *state, uint64_t total_ticks,
+                            uint64_t idle_ticks, double *utilization_pct)
+{
+    if (state == NULL || utilization_pct == NULL || total_ticks == 0 ||
+        idle_ticks > total_ticks) {
+        return false;
+    }
+    if (!state->has_previous) {
+        state->previous_total_ticks = total_ticks;
+        state->previous_idle_ticks = idle_ticks;
+        state->has_previous = true;
+        return false;
+    }
+    if (total_ticks <= state->previous_total_ticks ||
+        idle_ticks < state->previous_idle_ticks) {
+        state->previous_total_ticks = total_ticks;
+        state->previous_idle_ticks = idle_ticks;
+        return false;
+    }
+
+    uint64_t total_delta = total_ticks - state->previous_total_ticks;
+    uint64_t idle_delta = idle_ticks - state->previous_idle_ticks;
+    state->previous_total_ticks = total_ticks;
+    state->previous_idle_ticks = idle_ticks;
+    if (total_delta == 0 || idle_delta > total_delta) {
+        return false;
+    }
+    *utilization_pct =
+        100.0 * (double)(total_delta - idle_delta) / (double)total_delta;
+    return true;
+}
+
+static bool read_cpu_utilization(CpuSampleState *state,
+                                 double *utilization_pct)
+{
+    FILE *file = fopen("/proc/stat", "r");
+    if (file == NULL) {
+        return false;
+    }
+    char line[256];
+    bool parsed = fgets(line, sizeof(line), file) != NULL;
+    fclose(file);
+    uint64_t total_ticks;
+    uint64_t idle_ticks;
+    if (!parsed || !parse_cpu_stat_line(line, &total_ticks, &idle_ticks)) {
+        return false;
+    }
+    return update_cpu_utilization(state, total_ticks, idle_ticks,
+                                  utilization_pct);
+}
 
 static bool read_memory(HealthReport *report)
 {
@@ -70,8 +191,12 @@ static bool utilization_exceeds_threshold(uint64_t used, uint64_t total,
 
 HealthStatus evaluate_health_status(const HealthReport *report)
 {
-    if (!report->has_memory && !report->has_disk) {
+    if (!report->has_cpu && !report->has_memory && !report->has_disk) {
         return HEALTH_UNKNOWN;
+    }
+    if (report->has_cpu &&
+        report->cpu_used_pct > (double)report->cpu_warning_threshold_pct) {
+        return HEALTH_WARNING;
     }
     if (report->has_memory &&
         utilization_exceeds_threshold(report->memory_total_kb -
@@ -104,10 +229,17 @@ const char *health_status_name(HealthStatus status)
 }
 
 void collect_health_report(HealthReport *report,
-                           unsigned int warning_threshold_pct)
+                           unsigned int warning_threshold_pct,
+                           unsigned int cpu_warning_threshold_pct,
+                           CpuSampleState *cpu_state)
 {
     memset(report, 0, sizeof(*report));
     report->warning_threshold_pct = warning_threshold_pct;
+    report->cpu_warning_threshold_pct = cpu_warning_threshold_pct;
+    if (cpu_state != NULL) {
+        report->has_cpu = read_cpu_utilization(cpu_state,
+                                               &report->cpu_used_pct);
+    }
     read_memory(report);
     read_disk(report);
     report->status = evaluate_health_status(report);
@@ -117,6 +249,11 @@ void print_health_report(const HealthReport *report)
 {
     puts("Raspberry Pi Equipment Health Monitor");
     puts("-------------------------------------");
+    if (report->has_cpu) {
+        printf("CPU utilization:      %.1f%%\n", report->cpu_used_pct);
+    } else {
+        puts("CPU utilization:      N/A (waiting for two valid samples)");
+    }
     if (report->has_memory) {
         double used_percent =
             100.0 * (double)(report->memory_total_kb -
@@ -138,8 +275,10 @@ void print_health_report(const HealthReport *report)
     } else {
         puts("Root filesystem used: N/A");
     }
-    printf("Warning threshold:    %u%% memory/storage used\n",
+    printf("RAM/storage threshold:%u%% used\n",
            report->warning_threshold_pct);
+    printf("CPU warning threshold:%u%% used\n",
+           report->cpu_warning_threshold_pct);
     printf("Overall status:       %s\n", health_status_name(report->status));
 }
 
@@ -164,6 +303,25 @@ int append_health_report(const char *path, const HealthReport *report)
     } else {
         return -1;
     }
+    if (!write_header) {
+        FILE *existing = fopen(path, "r");
+        if (existing == NULL) {
+            return -1;
+        }
+        char existing_header[256];
+        bool header_read = fgets(existing_header, sizeof(existing_header),
+                                 existing) != NULL;
+        fclose(existing);
+        if (!header_read) {
+            errno = EINVAL;
+            return -1;
+        }
+        existing_header[strcspn(existing_header, "\r\n")] = '\0';
+        if (strcmp(existing_header, HEALTH_CSV_HEADER) != 0) {
+            errno = EINVAL;
+            return -1;
+        }
+    }
     FILE *file = fopen(path, "a");
     if (file == NULL) {
         return -1;
@@ -175,8 +333,7 @@ int append_health_report(const char *path, const HealthReport *report)
     }
     int result = 0;
     if (write_header &&
-        fputs("timestamp_utc,memory_used_pct,root_used_pct,warning_threshold_pct,status\n",
-              file) == EOF) {
+        fprintf(file, "%s\n", HEALTH_CSV_HEADER) < 0) {
         result = -1;
     }
     if (result == 0 && fprintf(file, "%s,", timestamp) < 0) {
@@ -203,8 +360,15 @@ int append_health_report(const char *path, const HealthReport *report)
             result = -1;
         }
     }
+    if (result == 0 && fprintf(file, ",%u,", report->warning_threshold_pct) < 0) {
+        result = -1;
+    }
+    if (result == 0 && report->has_cpu &&
+        fprintf(file, "%.1f", report->cpu_used_pct) < 0) {
+        result = -1;
+    }
     if (result == 0 &&
-        fprintf(file, ",%u,%s\n", report->warning_threshold_pct,
+        fprintf(file, ",%u,%s\n", report->cpu_warning_threshold_pct,
                 health_status_name(report->status)) < 0) {
         result = -1;
     }

@@ -11,6 +11,15 @@ typedef enum {
 } HealthStatus;
 
 typedef struct {
+    uint64_t previous_total_ticks;
+    uint64_t previous_idle_ticks;
+    bool has_previous;
+} CpuSampleState;
+
+typedef struct {
+    bool has_cpu;
+    double cpu_used_pct;
+    unsigned int cpu_warning_threshold_pct;
     bool has_memory;
     uint64_t memory_total_kb;
     uint64_t memory_available_kb;
@@ -21,7 +30,14 @@ typedef struct {
     HealthStatus status;
 } HealthReport;
 
-void collect_health_report(HealthReport *report, unsigned int warning_threshold_pct);
+void collect_health_report(HealthReport *report,
+                           unsigned int warning_threshold_pct,
+                           unsigned int cpu_warning_threshold_pct,
+                           CpuSampleState *cpu_state);
+bool parse_cpu_stat_line(const char *line, uint64_t *total_ticks,
+                         uint64_t *idle_ticks);
+bool update_cpu_utilization(CpuSampleState *state, uint64_t total_ticks,
+                            uint64_t idle_ticks, double *utilization_pct);
 HealthStatus evaluate_health_status(const HealthReport *report);
 void print_health_report(const HealthReport *report);
 int append_health_report(const char *path, const HealthReport *report);

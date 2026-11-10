@@ -9,6 +9,8 @@
 - Run on the Raspberry Pi with the GPIO LED wired; verify reports repeat at the
   configured interval and SIGINT/SIGTERM shuts down cleanly.
 - Run with `75` and verify the report displays a 75% memory/storage threshold.
+- Verify the default RAM/storage threshold is 70% and `--cpu-threshold` changes
+  the separate CPU warning threshold.
 - Run with invalid thresholds (`0`, `101`, `75.5`, or text) and verify a useful
   error and non-zero exit status.
 
@@ -19,11 +21,19 @@
 - Verify unavailable readings are not printed as zero.
 - Verify memory and storage each warn when utilization exceeds the configured
   threshold and remain healthy at exactly the threshold using controlled data.
+- Verify the first CPU sample reports unavailable, later samples use aggregate
+  `/proc/stat` counter deltas, and invalid/reset counters do not yield a bogus
+  percentage.
+- Verify CPU threshold equality remains healthy, exceeding it warns, and a CPU
+  warning drives the physical LED through the existing status mapping.
 
 ## CSV logging
 
 - Log to a new file and verify one row is appended per monitoring interval.
 - Verify the header appears only once across multiple samples.
+- Verify CPU utilization and its separate warning threshold are logged.
+- Use a new CSV filename after the CSV schema change; verify legacy logs are
+  rejected without being modified.
 - Verify unavailable readings produce empty CSV fields.
 - Attempt to log to an invalid path and verify the program reports an error
   and exits non-zero.
