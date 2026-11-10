@@ -2,6 +2,7 @@
 
 #include "health_monitor.h"
 #include "gpio_indicator.h"
+#include "display.h"
 
 #include <errno.h>
 #include <limits.h>
@@ -73,8 +74,28 @@ static int parse_interval(const char *text, unsigned int *interval)
     return 0;
 }
 
-static int wait_interval(unsigned int seconds)
+static int wait_interval(unsigned int seconds, Display *display)
 {
+    if (display != NULL && display->initialized) {
+        unsigned int steps = seconds * 10;
+        for (unsigned int i = 0; i < steps && !stop_requested; ++i) {
+            struct timespec slice = {.tv_sec = 0, .tv_nsec = 100000000};
+            int sleep_result;
+            do {
+                errno = 0;
+                sleep_result = nanosleep(&slice, &slice);
+            } while (sleep_result < 0 && errno == EINTR && !stop_requested);
+            if (sleep_result < 0 && !stop_requested) {
+                return -1;
+            }
+            display_poll_events(display);
+            if (stop_requested) {
+                break;
+            }
+        }
+        return 0;
+    }
+
     struct timespec remaining = {.tv_sec = (time_t)seconds, .tv_nsec = 0};
     while (!stop_requested && nanosleep(&remaining, &remaining) < 0) {
         if (errno != EINTR) {
@@ -155,27 +176,41 @@ int main(int argc, char **argv)
     }
     setvbuf(stdout, NULL, _IOLBF, 0);
 
+    Display display = {0};
+    char display_error[160];
+    bool dashboard_enabled = display_init(&display, display_error,
+                                          sizeof(display_error)) == 0;
+    if (!dashboard_enabled) {
+        fprintf(stderr, "Dashboard unavailable: %s; using text output.\n",
+                display_error);
+    }
+
     GpioIndicator indicator = {0};
     bool operation_failed = false;
     char gpio_error[256];
     if (gpio_indicator_init(&indicator, gpio_error, sizeof(gpio_error)) < 0) {
         fprintf(stderr, "Warning LED unavailable: %s\n", gpio_error);
+        display_close(&display);
         return 1;
     }
 
-    printf("Monitoring continuously every %u seconds. Press Ctrl+C to stop.\n",
-           interval_seconds);
+    if (!dashboard_enabled) {
+        printf("Monitoring continuously every %u seconds. Press Ctrl+C to stop.\n",
+               interval_seconds);
+    }
     CpuSampleState cpu_state = {0};
     while (!stop_requested) {
         HealthReport report;
         collect_health_report(&report, warning_threshold_pct,
                               cpu_warning_threshold_pct, &cpu_state);
-        print_health_report(&report);
+        if (!dashboard_enabled) {
+            print_health_report(&report);
+        }
         if (gpio_indicator_apply_status(&indicator, report.status, gpio_error,
                                         sizeof(gpio_error)) < 0) {
             fprintf(stderr, "Warning LED update failed: %s\n", gpio_error);
             operation_failed = true;
-        } else {
+        } else if (!dashboard_enabled) {
             printf("Warning LED:          %s\n",
                    report.status == HEALTH_WARNING ? "ON" : "OFF");
         }
@@ -190,7 +225,11 @@ int main(int argc, char **argv)
             }
             operation_failed = true;
         }
-        if (stop_requested || wait_interval(interval_seconds) < 0) {
+        if (dashboard_enabled) {
+            display_update(&display, &report);
+        }
+        if (stop_requested || wait_interval(interval_seconds,
+                                            dashboard_enabled ? &display : NULL) < 0) {
             if (!stop_requested) {
                 perror("Monitoring interval wait failed");
                 operation_failed = true;
@@ -204,6 +243,7 @@ int main(int argc, char **argv)
                 gpio_error);
         operation_failed = true;
     }
+    display_close(&display);
     puts("Monitoring stopped; warning LED is off.");
     return operation_failed ? 1 : 0;
 }

@@ -14,13 +14,13 @@ A lightweight Linux monitor for CPU, memory, and root-filesystem utilization. It
 
 ## Build and run
 
-Build on the Raspberry Pi with a C11 compiler, Make, and libgpiod development files:
+Build on the Raspberry Pi with a C11 compiler, Make, libgpiod, and ncurses development files:
 
 ```sh
 make
 ```
 
-Run continuously in the foreground. The default sampling interval is 5 seconds, and Ctrl+C stops the monitor cleanly:
+Run continuously in an interactive terminal for the ncurses dashboard. The default sampling interval is 5 seconds, and Ctrl+C stops the monitor cleanly. If ncurses cannot initialize or there is no interactive terminal, the monitor uses text output:
 
 ```sh
 ./health-monitor
@@ -33,6 +33,8 @@ The RAM and root-filesystem threshold defaults to 70%. CPU has a separate 60% de
 ```
 
 CPU utilization is unavailable on the initial sample because it establishes a counter baseline; valid CPU percentages appear from the next sample onward. Append one CSV report per sample:
+
+The dashboard shows CPU temperature as `N/A`; thermal data collection is not enabled. CPU history is retained for the latest 60 valid samples.
 
 ```sh
 ./health-monitor --log data/temperature_log.csv

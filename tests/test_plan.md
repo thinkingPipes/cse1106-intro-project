@@ -8,6 +8,11 @@
 - Run with an unknown option and verify it exits with a non-zero status.
 - Run on the Raspberry Pi with the GPIO LED wired; verify reports repeat at the
   configured interval and SIGINT/SIGTERM shuts down cleanly.
+- In an interactive terminal, verify the ncurses dashboard redraws after a
+  resize, shows a small-terminal message when below its minimum size, and falls
+  back to text output when no usable terminal is available.
+- Verify dashboard CPU/RAM/storage bars, CPU history, CPU-temperature N/A,
+  status colors, and timestamp update from each monitoring report.
 - Run with `75` and verify the report displays a 75% memory/storage threshold.
 - Verify the default RAM/storage threshold is 70% and `--cpu-threshold` changes
   the separate CPU warning threshold.
@@ -48,3 +53,5 @@
 - Verify SIGINT and SIGTERM turn the LED off before process exit.
 - Run `make test` to exercise resource threshold decisions, status-to-LED
   mapping, GPIO initialization errors, and mock cleanup on a host.
+- Verify `make test` remains independent of ncurses and does not initialize a
+  terminal.
