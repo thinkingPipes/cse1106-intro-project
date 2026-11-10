@@ -1,1 +1,1 @@
-timestamp_utc,temperature_c,load_1m,memory_available_pct,root_used_pct,status
+timestamp_utc,temperature_c,load_1m,memory_used_pct,root_used_pct,warning_threshold_pct,status

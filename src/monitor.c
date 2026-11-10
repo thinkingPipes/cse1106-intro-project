@@ -9,6 +9,7 @@
 #include <sys/statvfs.h>
 #include <time.h>
 
+/* Read Linux thermal sysfs, whose standard value is milli-degrees Celsius. */
 static bool read_temperature(HealthReport *report)
 {
     FILE *file = fopen("/sys/class/thermal/thermal_zone0/temp", "r");
@@ -28,6 +29,7 @@ static bool read_temperature(HealthReport *report)
     return true;
 }
 
+/* /proc/loadavg starts with the one-minute load average used by this report. */
 static bool read_load(HealthReport *report)
 {
     FILE *file = fopen("/proc/loadavg", "r");
@@ -41,6 +43,8 @@ static bool read_load(HealthReport *report)
     return valid;
 }
 
+/* MemAvailable estimates memory usable without swapping; retain total and
+ * available values so display and threshold logic share the same snapshot. */
 static bool read_memory(HealthReport *report)
 {
     FILE *file = fopen("/proc/meminfo", "r");
@@ -76,6 +80,8 @@ static bool read_memory(HealthReport *report)
     return true;
 }
 
+/* statvfs reports filesystem blocks; f_bavail excludes space unavailable to
+ * ordinary users, making it a useful measure of space available to the app. */
 static bool read_disk(HealthReport *report)
 {
     struct statvfs stats;
@@ -97,6 +103,7 @@ static bool read_disk(HealthReport *report)
     return true;
 }
 
+/* The first /proc/uptime field is elapsed seconds since boot. */
 static bool read_uptime(HealthReport *report)
 {
     FILE *file = fopen("/proc/uptime", "r");
@@ -110,7 +117,20 @@ static bool read_uptime(HealthReport *report)
     return valid;
 }
 
-static HealthStatus evaluate_status(const HealthReport *report)
+/* Compare against a floored integer percentage without multiplying the full
+ * total by 100, which could overflow for large counters. Equality is healthy. */
+static bool utilization_exceeds_threshold(uint64_t used, uint64_t total,
+                                          unsigned int threshold_pct)
+{
+    uint64_t threshold_used =
+        (total / 100) * threshold_pct +
+        ((total % 100) * threshold_pct) / 100;
+    return used > threshold_used;
+}
+
+/* Combine only available health metrics, preserving the highest severity.
+ * Load and uptime are informational and do not affect status. */
+HealthStatus evaluate_health_status(const HealthReport *report)
 {
     bool has_health_metric = false;
     HealthStatus status = HEALTHY;
@@ -126,24 +146,24 @@ static HealthStatus evaluate_status(const HealthReport *report)
 
     if (report->has_memory) {
         has_health_metric = true;
-        double available_percent =
-            100.0 * (double)report->memory_available_kb /
-            (double)report->memory_total_kb;
-        if (available_percent < 5.0) {
-            status = HEALTH_CRITICAL;
-        } else if (available_percent < 15.0 && status < HEALTH_WARNING) {
+        uint64_t used_kb = report->memory_total_kb -
+                           report->memory_available_kb;
+        if (utilization_exceeds_threshold(used_kb,
+                                          report->memory_total_kb,
+                                          report->warning_threshold_pct) &&
+            status < HEALTH_WARNING) {
             status = HEALTH_WARNING;
         }
     }
 
     if (report->has_disk) {
         has_health_metric = true;
-        double available_percent =
-            100.0 * (double)report->disk_available_bytes /
-            (double)report->disk_total_bytes;
-        if (available_percent < 5.0) {
-            status = HEALTH_CRITICAL;
-        } else if (available_percent < 15.0 && status < HEALTH_WARNING) {
+        uint64_t used_bytes = report->disk_total_bytes -
+                              report->disk_available_bytes;
+        if (utilization_exceeds_threshold(used_bytes,
+                                          report->disk_total_bytes,
+                                          report->warning_threshold_pct) &&
+            status < HEALTH_WARNING) {
             status = HEALTH_WARNING;
         }
     }
@@ -151,6 +171,7 @@ static HealthStatus evaluate_status(const HealthReport *report)
     return has_health_metric ? status : HEALTH_UNKNOWN;
 }
 
+/* Centralized names keep console and CSV status labels consistent. */
 const char *health_status_name(HealthStatus status)
 {
     switch (status) {
@@ -166,17 +187,22 @@ const char *health_status_name(HealthStatus status)
     }
 }
 
-void collect_health_report(HealthReport *report)
+void collect_health_report(HealthReport *report,
+                           unsigned int warning_threshold_pct)
 {
+    /* Clear flags and values so failed individual reads remain explicitly absent;
+     * one unavailable source does not stop collection of the others. */
     memset(report, 0, sizeof(*report));
+    report->warning_threshold_pct = warning_threshold_pct;
     read_temperature(report);
     read_load(report);
     read_memory(report);
     read_disk(report);
     read_uptime(report);
-    report->status = evaluate_status(report);
+    report->status = evaluate_health_status(report);
 }
 
+/* Convert elapsed seconds to a compact day/hour/minute display. */
 static void print_uptime(double seconds)
 {
     uint64_t total_seconds = (uint64_t)seconds;
@@ -198,6 +224,8 @@ static void print_uptime(double seconds)
 
 void print_health_report(const HealthReport *report)
 {
+    /* Presence flags control N/A output; utilization is derived from used =
+     * total minus available, matching the evaluator's resource calculations. */
     puts("Raspberry Pi Equipment Health Monitor");
     puts("-------------------------------------");
 
@@ -208,15 +236,16 @@ void print_health_report(const HealthReport *report)
     }
 
     if (report->has_memory) {
-        double available_percent =
-            100.0 * (double)report->memory_available_kb /
+        double used_percent =
+            100.0 * (double)(report->memory_total_kb -
+                             report->memory_available_kb) /
             (double)report->memory_total_kb;
-        printf("Memory available:     %.1f%% (%llu / %llu kB)\n",
-               available_percent,
+        printf("Memory used:          %.1f%% (%llu / %llu kB total)\n",
+               used_percent,
                (unsigned long long)report->memory_available_kb,
                (unsigned long long)report->memory_total_kb);
     } else {
-        puts("Memory available:     N/A");
+        puts("Memory used:          N/A");
     }
 
     if (report->has_disk) {
@@ -243,9 +272,12 @@ void print_health_report(const HealthReport *report)
         puts("N/A");
     }
 
+    printf("Warning threshold:    %u%% memory/storage used\n",
+           report->warning_threshold_pct);
     printf("Overall status:       %s\n", health_status_name(report->status));
 }
 
+/* CSV timestamps are UTC so log rows compare consistently across time zones. */
 static bool format_timestamp(char *buffer, size_t size)
 {
     time_t now = time(NULL);
@@ -258,6 +290,8 @@ static bool format_timestamp(char *buffer, size_t size)
 
 int append_health_report(const char *path, const HealthReport *report)
 {
+    /* Create the header for a new or empty file, then append one row. Every
+     * failed write/close is propagated so callers can return a nonzero status. */
     struct stat file_stats;
     bool write_header = false;
     if (stat(path, &file_stats) == 0) {
@@ -281,8 +315,8 @@ int append_health_report(const char *path, const HealthReport *report)
 
     int result = 0;
     if (write_header &&
-        fputs("timestamp_utc,temperature_c,load_1m,memory_available_pct,"
-              "root_used_pct,status\n", file) == EOF) {
+        fputs("timestamp_utc,temperature_c,load_1m,memory_used_pct,"
+              "root_used_pct,warning_threshold_pct,status\n", file) == EOF) {
         result = -1;
     }
 
@@ -290,6 +324,8 @@ int append_health_report(const char *path, const HealthReport *report)
         fprintf(file, "%s,", timestamp) < 0) {
         result = -1;
     }
+    /* Missing metrics are emitted as empty fields, preserving CSV column order
+     * without incorrectly representing unavailable readings as zero. */
     if (result == 0) {
         if (report->has_temperature) {
             result = fprintf(file, "%.1f", report->temperature_c) < 0 ? -1 : 0;
@@ -308,10 +344,11 @@ int append_health_report(const char *path, const HealthReport *report)
     }
     if (result == 0) {
         if (report->has_memory) {
-            double available_percent =
-                100.0 * (double)report->memory_available_kb /
+            double used_percent =
+                100.0 * (double)(report->memory_total_kb -
+                                 report->memory_available_kb) /
                 (double)report->memory_total_kb;
-            result = fprintf(file, "%.1f", available_percent) < 0 ? -1 : 0;
+            result = fprintf(file, "%.1f", used_percent) < 0 ? -1 : 0;
         }
         if (result == 0 && fputc(',', file) == EOF) {
             result = -1;
@@ -326,7 +363,8 @@ int append_health_report(const char *path, const HealthReport *report)
             result = fprintf(file, "%.1f", used_percent) < 0 ? -1 : 0;
         }
         if (result == 0 &&
-            fprintf(file, ",%s\n", health_status_name(report->status)) < 0) {
+            fprintf(file, ",%u,%s\n", report->warning_threshold_pct,
+                    health_status_name(report->status)) < 0) {
             result = -1;
         }
     }
