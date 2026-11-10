@@ -14,8 +14,7 @@
 #define WARNING_LED_GPIO 17U
 #define DEFAULT_GPIO_CHIP "/dev/gpiochip0"
 
-/* Convert errno from the immediately preceding failing system call into a
- * message that can be returned through the module's caller-owned buffer. */
+
 static void set_error(char *error, size_t error_size, const char *operation)
 {
     if (error != NULL && error_size > 0) {
@@ -27,8 +26,7 @@ static void set_error(char *error, size_t error_size, const char *operation)
 int gpio_indicator_init(GpioIndicator *indicator, char *error,
                         size_t error_size)
 {
-    /* Common reset leaves a predictable state on both supported and unsupported
-     * builds; the build without libgpiod reports a useful ENOSYS failure. */
+    
     memset(indicator, 0, sizeof(*indicator));
 
 #ifndef HAVE_LIBGPIOD
@@ -39,7 +37,7 @@ int gpio_indicator_init(GpioIndicator *indicator, char *error,
               "GPIO support was not built (install libgpiod development files and rebuild)");
     return -1;
 #else
-    /* Allow boards with a nonstandard gpiochip device path to override the default. */
+    
     const char *chip_path = getenv("HEALTH_MONITOR_GPIO_CHIP");
     if (chip_path == NULL || chip_path[0] == '\0') {
         chip_path = DEFAULT_GPIO_CHIP;
@@ -54,8 +52,7 @@ int gpio_indicator_init(GpioIndicator *indicator, char *error,
     indicator->backend = GPIO_BACKEND_HARDWARE;
 
 #ifdef GPIOD_API_V2
-    /* libgpiod v2 builds describe the output line and initial LOW level through
-     * settings/config objects, then request the line as one owned resource. */
+    
     struct gpiod_line_settings *settings = gpiod_line_settings_new();
     struct gpiod_line_config *line_config = gpiod_line_config_new();
     struct gpiod_request_config *request_config = gpiod_request_config_new();
@@ -96,7 +93,7 @@ int gpio_indicator_init(GpioIndicator *indicator, char *error,
     }
     indicator->line = request;
 #else
-    /* Older libgpiod exposes a line handle and requests output with initial LOW. */
+    
     struct gpiod_line *line = gpiod_chip_get_line(chip, WARNING_LED_GPIO);
     if (line == NULL) {
         set_error(error, error_size, "could not find GPIO 17 on GPIO chip");
@@ -117,11 +114,11 @@ int gpio_indicator_init(GpioIndicator *indicator, char *error,
 #endif
 }
 
+#ifdef HEALTH_MONITOR_TEST
 int gpio_indicator_init_mock(GpioIndicator *indicator, char *error,
                              size_t error_size)
 {
-    /* Mock mode owns no device handles; initialization records backend state and
-     * routes the initial safe LOW request through the same setter as hardware. */
+    
     (void)error;
     (void)error_size;
     memset(indicator, 0, sizeof(*indicator));
@@ -129,18 +126,19 @@ int gpio_indicator_init_mock(GpioIndicator *indicator, char *error,
     indicator->initialized = true;
     return gpio_indicator_set(indicator, false, error, error_size);
 }
+#endif
 
 int gpio_indicator_set(GpioIndicator *indicator, bool on,
                        char *error, size_t error_size)
 {
-    /* Validate lifecycle before touching either backend. The mock records each
-     * request and prints it; hardware mode below asks libgpiod to set the pin. */
+    
     if (indicator == NULL || !indicator->initialized) {
         errno = ENODEV;
         set_error(error, error_size, "GPIO indicator is not initialized");
         return -1;
     }
 
+#ifdef HEALTH_MONITOR_TEST
     if (indicator->backend == GPIO_BACKEND_MOCK) {
         indicator->mock_output = on;
         if (on) {
@@ -151,6 +149,7 @@ int gpio_indicator_set(GpioIndicator *indicator, bool on,
         printf("MOCK GPIO 17: %s\n", on ? "HIGH" : "LOW");
         return 0;
     }
+#endif
 
 #ifndef HAVE_LIBGPIOD
     errno = ENOSYS;
@@ -164,7 +163,7 @@ int gpio_indicator_set(GpioIndicator *indicator, bool on,
     }
 
 #ifdef GPIOD_API_V2
-    /* ACTIVE/INACTIVE are logical output states; on maps to HIGH, off to LOW. */
+    
     int result = gpiod_line_request_set_value(
         (struct gpiod_line_request *)indicator->line, WARNING_LED_GPIO,
         on ? GPIOD_LINE_VALUE_ACTIVE : GPIOD_LINE_VALUE_INACTIVE);
@@ -184,16 +183,15 @@ int gpio_indicator_set(GpioIndicator *indicator, bool on,
 int gpio_indicator_apply_status(GpioIndicator *indicator, HealthStatus status,
                                 char *error, size_t error_size)
 {
-    /* Keep policy here: both warning severities light the LED, other statuses clear it. */
-    bool on = status == HEALTH_WARNING || status == HEALTH_CRITICAL;
+    
+    bool on = status == HEALTH_WARNING;
     return gpio_indicator_set(indicator, on, error, error_size);
 }
 
 int gpio_indicator_close(GpioIndicator *indicator, char *error,
                          size_t error_size)
 {
-    /* Cleanup first attempts LOW, then releases line and chip handles even if
-     * that output request fails; return the failure so main can report it. */
+    
     int result = 0;
     if (indicator == NULL) {
         return 0;
