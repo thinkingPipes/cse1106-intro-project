@@ -1,30 +1,43 @@
 # Design
 
-The program is a small C11 command-line application. `src/main.c` parses
-`--help`, the optional `--log FILE` argument, and an optional integer
-memory/storage warning threshold (default 80%, range 1–100). It requests one
-health snapshot, prints it, and optionally appends it to a CSV file.
+The application is a C11 sampling process with an embedded CivetWeb HTTP
+server and an interactive text launcher. `src/monitor.c` remains the sole
+metric collector and status evaluator; it reads CPU counters from `/proc/stat`,
+memory from `/proc/meminfo`, and root filesystem capacity through `statvfs`.
+`src/gpio_indicator.c` owns GPIO 17 initialization, output, and cleanup. The
+sampling loop applies each report to the LED and optionally appends it to CSV.
 
-`src/monitor.c` reads CPU temperature from Linux thermal sysfs, memory/load/
-uptime from `/proc`, and root filesystem capacity through `statvfs`. Each
-metric is tracked separately so an unavailable sensor does not invalidate
-other readings. The status evaluator checks CPU temperature, available memory,
-and root filesystem utilization. Load and uptime are informational.
+`src/web_server.c` starts CivetWeb with a static document root and registers
+`GET /api/health`, `GET /api/metrics`, and `GET /api/history`. CivetWeb worker threads can run
+handlers concurrently with the sampling loop. The latest `HealthReport` and
+UTC sample timestamp are copied under a pthread mutex; handlers release the
+mutex before JSON formatting or network writes. Collection and GPIO access
+remain on the main thread. Shutdown stops CivetWeb and joins its workers before
+destroying the snapshot mutex.
 
-Memory and root filesystem utilization are both evaluated as percentage used;
-either exceeding the configured threshold causes a warning, while equality
-does not. CPU temperature retains its existing independent warning/critical
-thresholds. The CSV log contains a UTC timestamp, the reported readings,
-configured threshold, and overall status. Unsupported values are left blank.
-`include/health_monitor.h` defines the report structure shared by the entry
-point and collector.
+`src/web_api.c` owns the API JSON representation. The API exposes health,
+current metrics, and optional CSV history; the browser dashboard currently
+builds trends from samples it observes during that browser session.
+Percentages are calculated from existing counters and capacities, and
+unavailable measurements serialize
+as `null` with `available: false`. `/api/health` is a service liveness route:
+HTTP 200 means the service responded, while its JSON `status` gives the
+monitored system status. API routes accept GET only. CivetWeb serves static
+files from `web/`, which contains the responsive dashboard.
 
-`src/gpio_indicator.c` owns GPIO setup, output changes, and cleanup, separate
-from metric collection. It uses libgpiod on hardware-enabled builds. The
-application requests GPIO 17 as an output initialized LOW, then applies the
-report status to the LED. `--mock-gpio` uses a mock backend that prints and
-records HIGH/LOW requests without physical hardware; `--no-gpio` skips the
-indicator entirely. A memory or storage threshold exceedance produces
-`WARNING`; the independent CPU-temperature rule can produce `CRITICAL`, which
-also lights the LED. Failed hardware initialization is reported and yields a
-non-zero exit status.
+CivetWeb provides embedded startup, request handlers, and static file serving.
+It runs worker threads, which is why report snapshots use a mutex. The build
+uses the system CivetWeb development package rather than vendoring a server
+source tree. It uses pkg-config metadata when available and otherwise links
+the installed system library directly.
+
+The default listener is `127.0.0.1:8080`. `--host` accepts an IPv4 address;
+`--host 0.0.0.0` allows IPv4 access from the local network. The HTTP API is
+read-only and has no authentication; users should bind only on a trusted
+network and restrict access with their firewall. Server host, port, and
+static root are configurable at startup.
+
+The CLI polls for `h`, `t`, and `q` input while keeping sampling and GPIO
+updates on the main thread. CPU and RAM stress procedures run as child
+processes so they do not block sampling. The RAM script checks `MemAvailable`
+before each allocation and preserves a 1024 MiB pre-stage reserve.

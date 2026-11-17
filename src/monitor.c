@@ -12,6 +12,8 @@
 #include <sys/statvfs.h>
 #include <time.h>
 
+pthread_mutex_t health_csv_mutex = PTHREAD_MUTEX_INITIALIZER;
+
 #define HEALTH_CSV_HEADER \
     "timestamp_utc,memory_used_pct,root_used_pct,warning_threshold_pct," \
     "cpu_used_pct,cpu_warning_threshold_pct,status"
@@ -294,6 +296,7 @@ static bool format_timestamp(char *buffer, size_t size)
 
 int append_health_report(const char *path, const HealthReport *report)
 {
+    (void)pthread_mutex_lock(&health_csv_mutex);
     struct stat file_stats;
     bool write_header = false;
     if (stat(path, &file_stats) == 0) {
@@ -301,11 +304,13 @@ int append_health_report(const char *path, const HealthReport *report)
     } else if (errno == ENOENT) {
         write_header = true;
     } else {
+        (void)pthread_mutex_unlock(&health_csv_mutex);
         return -1;
     }
     if (!write_header) {
         FILE *existing = fopen(path, "r");
         if (existing == NULL) {
+            (void)pthread_mutex_unlock(&health_csv_mutex);
             return -1;
         }
         char existing_header[256];
@@ -314,21 +319,25 @@ int append_health_report(const char *path, const HealthReport *report)
         fclose(existing);
         if (!header_read) {
             errno = EINVAL;
+            (void)pthread_mutex_unlock(&health_csv_mutex);
             return -1;
         }
         existing_header[strcspn(existing_header, "\r\n")] = '\0';
         if (strcmp(existing_header, HEALTH_CSV_HEADER) != 0) {
             errno = EINVAL;
+            (void)pthread_mutex_unlock(&health_csv_mutex);
             return -1;
         }
     }
     FILE *file = fopen(path, "a");
     if (file == NULL) {
+        (void)pthread_mutex_unlock(&health_csv_mutex);
         return -1;
     }
     char timestamp[32];
     if (!format_timestamp(timestamp, sizeof(timestamp))) {
         fclose(file);
+        (void)pthread_mutex_unlock(&health_csv_mutex);
         return -1;
     }
     int result = 0;
@@ -375,5 +384,6 @@ int append_health_report(const char *path, const HealthReport *report)
     if (fclose(file) != 0) {
         result = -1;
     }
+    (void)pthread_mutex_unlock(&health_csv_mutex);
     return result;
 }

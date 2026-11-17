@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f3f6fa">
+  <title>Northstar | Equipment monitor</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar" aria-label="Primary navigation">
+      <a class="brand" href="#" aria-label="Northstar home">
+        <span class="brand-mark"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M16 3.5 28.5 16 16 28.5 3.5 16 16 3.5Z"/><path d="m16 9 2.1 4.9L23 16l-4.9 2.1L16 23l-2.1-4.9L9 16l4.9-2.1L16 9Z"/></svg></span>
+        <span class="brand-name">northstar<span>MONITORING</span></span>
+      </a>
+      <div class="nav-label">WORKSPACE</div>
+      <nav class="nav-list">
+        <a class="nav-item active" href="#overview"><span class="nav-icon">◫</span>Overview</a>
+        <a class="nav-item" href="#resources"><span class="nav-icon">◈</span>Resources</a>
+      </nav>
+      <div class="sidebar-bottom">
+        <div class="sidebar-rule"></div>
+        <div class="side-system"><span class="side-dot"></span><div><strong>Local system</strong><small>Linux host</small></div><span class="side-menu">···</span></div>
+        <div class="profile"><div class="avatar">NS</div><div><strong>Operations</strong><small>Administrator</small></div><span class="side-menu">⌄</span></div>
+      </div>
+    </aside>
+
+    <main class="main-content" id="overview">
+      <header class="topbar">
+        <div class="breadcrumbs"><span>Workspace</span><span class="crumb-sep">/</span><strong>Overview</strong></div>
+        <div class="topbar-right"><span class="env-pill"><i></i> LOCAL ENVIRONMENT</span><span class="top-divider"></span><button class="icon-button" aria-label="Notifications">♧<b></b></button><div class="top-avatar">OP</div></div>
+      </header>
+
+      <section class="page-heading">
+        <div><div class="eyebrow">SYSTEM OVERVIEW <span>•</span> MONITORING</div><h1>Equipment overview</h1><p class="subtitle">A real-time view of your system health and resource utilization.</p></div>
+        <button class="refresh-button" id="refresh-button"><span class="refresh-symbol">↻</span> Refresh data</button>
+      </section>
+
+      <section class="status-banner" aria-label="System health">
+        <div class="status-icon" id="status-icon"><span>…</span></div>
+        <div class="status-copy"><div class="status-line"><strong id="status-title">Waiting for monitor</strong><span class="health-badge unknown" id="overall-status">UNKNOWN</span></div><p id="status-description">Connecting to the equipment monitor…</p></div>
+        <div class="status-meta"><span class="pulse-dot" id="sample-dot"></span><span>Last sample</span><strong id="last-sample">No sample received</strong></div>
+      </section>
+
+      <section class="pressure-banner" id="pressure-banner" aria-live="polite" aria-label="Resource closest to its warning threshold">
+        <div class="pressure-icon" aria-hidden="true">⌁</div>
+        <div class="pressure-copy"><div class="pressure-heading"><span class="pressure-kicker">HIGHEST THRESHOLD PRESSURE</span><span class="pressure-state neutral" id="pressure-state">WAITING FOR DATA</span></div><h2 id="pressure-title">Evaluating resource thresholds</h2><p id="pressure-detail">The closest available metric will appear here.</p></div>
+        <div class="pressure-ratio"><strong id="pressure-ratio">—</strong><span>of warning limit</span></div>
+      </section>
+
+      <section class="section-heading" id="resources"><div><h2>Resource utilization</h2><p>Current usage across your system</p></div><span class="update-label"><span class="pulse-dot"></span> POLLING EVERY 5 SEC</span></section>
+
+      <section class="metric-grid" aria-label="Resource utilization metrics">
+        <article class="metric-card" data-metric="cpu">
+          <div class="metric-top"><div class="metric-title"><span class="metric-icon cpu-icon">⌘</span><div><h3>CPU usage</h3><span class="metric-caption">Processor utilization</span></div></div><button class="more-button" aria-label="CPU options">···</button></div>
+          <div class="gauge-wrap"><div class="gauge unavailable" id="cpu-gauge" style="--value:0;--gauge-color:#4278e8"><div class="gauge-inner"><strong id="cpu-value">—</strong><small id="cpu-gauge-label">UNAVAILABLE</small></div></div></div>
+          <div class="metric-bottom"><span><i class="legend-dot blue"></i> Current usage</span><strong id="cpu-detail">No reading</strong></div>
+          <div class="threshold"><span>Warning threshold</span><strong id="cpu-threshold">—</strong></div>
+        </article>
+        <article class="metric-card" data-metric="memory">
+          <div class="metric-top"><div class="metric-title"><span class="metric-icon memory-icon">▤</span><div><h3>Memory usage</h3><span class="metric-caption">System memory</span></div></div><button class="more-button" aria-label="Memory options">···</button></div>
+          <div class="gauge-wrap"><div class="gauge unavailable" id="memory-gauge" style="--value:0;--gauge-color:#8063df"><div class="gauge-inner"><strong id="memory-value">—</strong><small id="memory-gauge-label">UNAVAILABLE</small></div></div></div>
+          <div class="metric-bottom"><span><i class="legend-dot purple"></i><span id="memory-detail">No reading</span></span><strong id="memory-capacity">—</strong></div>
+          <div class="threshold"><span>Warning threshold</span><strong id="memory-threshold">—</strong></div>
+        </article>
+        <article class="metric-card" data-metric="storage">
+          <div class="metric-top"><div class="metric-title"><span class="metric-icon storage-icon">▰</span><div><h3>Storage usage</h3><span class="metric-caption">Root filesystem</span></div></div><button class="more-button" aria-label="Storage options">···</button></div>
+          <div class="gauge-wrap"><div class="gauge unavailable" id="storage-gauge" style="--value:0;--gauge-color:#18a889"><div class="gauge-inner"><strong id="storage-value">—</strong><small id="storage-gauge-label">UNAVAILABLE</small></div></div></div>
+          <div class="metric-bottom"><span><i class="legend-dot green"></i><span id="storage-detail">No reading</span></span><strong id="storage-capacity">—</strong></div>
+          <div class="threshold"><span>Warning threshold</span><strong id="storage-threshold">—</strong></div>
+        </article>
+      </section>
+
+      <section class="trend-card">
+        <div class="trend-header"><div><h2>Resource trends</h2><p id="trend-description">Most recent browser-session samples · 0 readings (max 360)</p></div><div class="chart-legend"><span><i class="legend-dot blue"></i> CPU</span><span><i class="legend-dot purple"></i> Memory</span><span><i class="legend-dot green"></i> Storage</span><span><i class="threshold-key"></i> Warning limits</span></div></div>
+        <div class="chart-wrap"><canvas id="trend-chart" aria-describedby="trend-description" aria-label="Trend chart of CPU, memory, and filesystem utilization with dashed warning thresholds"></canvas></div>
+        <details class="chart-data">
+          <summary>View observed chart data as a table</summary>
+          <p class="table-thresholds" id="session-thresholds">Warning limits are supplied by the monitor API.</p>
+          <div class="table-scroll"><table><caption>Most recent distinct samples observed in this browser session, up to 360 readings</caption><thead><tr><th scope="col">Sample time</th><th scope="col">CPU</th><th scope="col">Memory</th><th scope="col">Filesystem</th></tr></thead><tbody id="session-data-rows"><tr><td colspan="4">No timestamped samples observed yet.</td></tr></tbody></table></div>
+        </details>
+        <div class="chart-foot"><span><i class="pulse-dot" id="connection-dot"></i><span id="connection-text">Connecting to API</span></span><span>Session observations only · no persistent history</span></div>
+      </section>
+      <footer class="footer"><span>Northstar Monitoring <span class="footer-sep">·</span> Local system</span><span>API status <span class="connection-indicator" id="api-status"><i></i> Connecting</span></span></footer>
+    </main>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

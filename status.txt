@@ -1,4 +1,11 @@
 Project: Raspberry Pi Equipment Health Monitor
-Status: Initial Linux health snapshot and optional CSV logging implemented.
-Build: gcc -Wall -Wextra -Wpedantic -std=c11 -Iinclude src/main.c src/monitor.c -o health-monitor
-Platform: Linux; Raspberry Pi thermal sensor support depends on sysfs availability.
+Status: C11 CPU, memory, and root-filesystem monitor with GPIO 17, optional CSV
+        logging, an embedded CivetWeb server, and an interactive CLI launcher.
+Web: Responsive dashboard served from web/; charts contain browser-session
+     samples, while the API provides current metrics and optional CSV history.
+API: GET /api/health, /api/metrics, and /api/history. Default bind is
+     127.0.0.1:8080; LAN access is opt-in with --host 0.0.0.0.
+CLI: h shows help, t opens five documented hardware tests, q shuts down.
+Build: make uses libgpiod and CivetWeb development files; CivetWeb pkg-config
+       metadata is optional when its system header and library are installed.
+Tests: make test uses mock GPIO and does not require CivetWeb or hardware.
