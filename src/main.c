@@ -5,15 +5,22 @@
 #include "web_server.h"
 
 #include <arpa/inet.h>
+#include <ctype.h>
 #include <errno.h>
 #include <limits.h>
+#include <poll.h>
+#include <spawn.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/wait.h>
 #include <time.h>
+#include <unistd.h>
 
 static volatile sig_atomic_t stop_requested;
+
+extern char **environ;
 
 static void handle_stop_signal(int signal_number)
 {
@@ -34,6 +41,204 @@ static void print_usage(const char *program)
     puts("  --cpu-threshold PCT  CPU warning threshold (integer 1-100; default 60)");
     puts("  THRESHOLD   RAM/storage warning threshold (integer 1-100; default 70)");
     puts("  --help      Show this help message");
+}
+
+static void print_control_help(void)
+{
+    puts("\nCommands (press Enter after a command):");
+    puts("  h  Show this help");
+    puts("  q  Stop the monitor and web server");
+}
+
+static void print_startup_banner(const char *host, unsigned int port)
+{
+    const char *dashboard_host = host;
+    if (strcmp(host, "0.0.0.0") == 0) {
+        dashboard_host = "127.0.0.1";
+    }
+
+    printf("\nRaspberry Pi Equipment Health Monitor\n");
+    puts("Web server started.");
+    printf("Dashboard: http://%s:%u/\n", dashboard_host, port);
+    if (strcmp(host, "0.0.0.0") == 0) {
+        printf("From another device, open http://<PI-LAN-IP>:%u/\n", port);
+    } else if (strcmp(host, "127.0.0.1") == 0) {
+        printf("For LAN access, restart with --host 0.0.0.0, then open\n");
+        printf("http://<PI-LAN-IP>:%u/ from the other device.\n", port);
+    } else {
+        printf("From another device on this network, open http://%s:%u/\n",
+               host, port);
+    }
+    print_control_help();
+}
+
+static bool graphical_session_available(void)
+{
+    const char *display = getenv("DISPLAY");
+    const char *wayland_display = getenv("WAYLAND_DISPLAY");
+    return (display != NULL && display[0] != '\0') ||
+           (wayland_display != NULL && wayland_display[0] != '\0');
+}
+
+static pid_t launch_browser(const char *url)
+{
+    if (!graphical_session_available()) {
+        puts("No graphical session detected; open the dashboard URL manually.");
+        return -1;
+    }
+
+    /* Pass the URL as an argument instead of invoking a shell. */
+    char *arguments[] = {(char *)"xdg-open", (char *)url, NULL};
+    pid_t child = -1;
+    int result = posix_spawnp(&child, "xdg-open", NULL, NULL, arguments,
+                              environ);
+    if (result != 0) {
+        fprintf(stderr,
+                "Could not launch xdg-open (%s); open the dashboard URL manually.\n",
+                strerror(result));
+        return -1;
+    }
+    puts("Asked xdg-open to open the dashboard.");
+    return child;
+}
+
+/* Reap an exited xdg-open child without waiting for a browser to close. */
+static void reap_browser(pid_t *browser_child)
+{
+    if (browser_child == NULL || *browser_child <= 0) {
+        return;
+    }
+    int status;
+    pid_t result;
+    do {
+        result = waitpid(*browser_child, &status, WNOHANG);
+    } while (result < 0 && errno == EINTR);
+    if (result == *browser_child) {
+        if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+            puts("Automatic browser opening failed; open the dashboard URL manually.");
+        }
+        *browser_child = -1;
+    } else if (result < 0 && errno == ECHILD) {
+        *browser_child = -1;
+    }
+}
+
+static bool handle_control_line(char *line)
+{
+    char *command = line;
+    while (isspace((unsigned char)*command)) {
+        ++command;
+    }
+    char *end = command + strlen(command);
+    while (end > command && isspace((unsigned char)end[-1])) {
+        *--end = '\0';
+    }
+    if (strcmp(command, "h") == 0) {
+        print_control_help();
+    } else if (strcmp(command, "q") == 0) {
+        stop_requested = 1;
+    } else if (command[0] != '\0') {
+        printf("Unknown command: %s\n", command);
+        print_control_help();
+    }
+    return !stop_requested;
+}
+
+/* Poll stdin until the next sample deadline; completed terminal lines are
+ * available after Enter when the terminal is in its normal canonical mode. */
+static int wait_for_input_or_timeout(unsigned int seconds, bool *input_open,
+                                     pid_t *browser_child)
+{
+    struct timespec deadline;
+    if (clock_gettime(CLOCK_MONOTONIC, &deadline) < 0) {
+        return -1;
+    }
+    deadline.tv_sec += (time_t)seconds;
+
+    char line[128];
+    size_t line_length = 0;
+    bool discard_line = false;
+    while (!stop_requested) {
+        reap_browser(browser_child);
+        struct timespec now;
+        if (clock_gettime(CLOCK_MONOTONIC, &now) < 0) {
+            return -1;
+        }
+        time_t remaining_seconds = deadline.tv_sec - now.tv_sec;
+        long remaining_nanoseconds = deadline.tv_nsec - now.tv_nsec;
+        if (remaining_nanoseconds < 0) {
+            --remaining_seconds;
+            remaining_nanoseconds += 1000000000L;
+        }
+        if (remaining_seconds < 0 ||
+            (remaining_seconds == 0 && remaining_nanoseconds <= 0)) {
+            return 0;
+        }
+        long long timeout_ms = (long long)remaining_seconds * 1000LL +
+                               (remaining_nanoseconds + 999999L) / 1000000L;
+        if (timeout_ms > INT_MAX) {
+            timeout_ms = INT_MAX;
+        }
+
+        struct pollfd input = {
+            .fd = input_open != NULL && *input_open ? STDIN_FILENO : -1,
+            .events = POLLIN,
+            .revents = 0
+        };
+        int poll_result = poll(&input, 1, (int)timeout_ms);
+        if (poll_result == 0) {
+            return 0;
+        }
+        if (poll_result < 0) {
+            if (errno == EINTR && !stop_requested) {
+                continue;
+            }
+            return stop_requested ? 0 : -1;
+        }
+        if ((input.revents & (POLLIN | POLLHUP)) != 0 &&
+            input.fd >= 0) {
+            char bytes[128];
+            ssize_t count = read(STDIN_FILENO, bytes, sizeof(bytes));
+            if (count == 0) {
+                if (input_open != NULL) {
+                    *input_open = false;
+                }
+            } else if (count < 0) {
+                if (errno != EINTR && errno != EAGAIN) {
+                    if (input_open != NULL) {
+                        *input_open = false;
+                    }
+                }
+            } else {
+                for (ssize_t i = 0; i < count; ++i) {
+                    char byte = bytes[i];
+                    if (byte == '\n' || byte == '\r') {
+                        if (!discard_line) {
+                            line[line_length] = '\0';
+                            if (!handle_control_line(line)) {
+                                return 0;
+                            }
+                        } else {
+                            puts("Command too long; enter h or q.");
+                        }
+                        line_length = 0;
+                        discard_line = false;
+                    } else if (!discard_line) {
+                        if (line_length + 1 < sizeof(line)) {
+                            line[line_length++] = byte;
+                        } else {
+                            discard_line = true;
+                        }
+                    }
+                }
+            }
+        }
+        if ((input.revents & (POLLERR | POLLNVAL)) != 0 &&
+            input_open != NULL) {
+            *input_open = false;
+        }
+    }
+    return 0;
 }
 
 static int parse_threshold(const char *text, unsigned int *threshold)
@@ -96,17 +301,6 @@ static int parse_port(const char *text, unsigned int *port)
         return -1;
     }
     *port = (unsigned int)value;
-    return 0;
-}
-
-static int wait_interval(unsigned int seconds)
-{
-    struct timespec remaining = {.tv_sec = (time_t)seconds, .tv_nsec = 0};
-    while (!stop_requested && nanosleep(&remaining, &remaining) < 0) {
-        if (errno != EINTR) {
-            return -1;
-        }
-    }
     return 0;
 }
 
@@ -241,21 +435,25 @@ int main(int argc, char **argv)
         }
         return 1;
     }
-    printf("Monitoring every %u seconds; HTTP server bound to %s:%u (Ctrl+C to stop).\n",
-           interval_seconds, host, port);
+    char dashboard_url[INET_ADDRSTRLEN + 32];
+    const char *dashboard_host = strcmp(host, "0.0.0.0") == 0
+                                     ? "127.0.0.1"
+                                     : host;
+    (void)snprintf(dashboard_url, sizeof(dashboard_url), "http://%s:%u/",
+                   dashboard_host, port);
+    print_startup_banner(host, port);
+    pid_t browser_child = launch_browser(dashboard_url);
+    bool input_open = true;
+
     CpuSampleState cpu_state = {0};
     while (!stop_requested) {
         HealthReport report;
         collect_health_report(&report, warning_threshold_pct,
                               cpu_warning_threshold_pct, &cpu_state);
-        print_health_report(&report);
         if (gpio_indicator_apply_status(&indicator, report.status, gpio_error,
                                         sizeof(gpio_error)) < 0) {
             fprintf(stderr, "Warning LED update failed: %s\n", gpio_error);
             operation_failed = true;
-        } else {
-            printf("Warning LED:          %s\n",
-                   report.status == HEALTH_WARNING ? "ON" : "OFF");
         }
         if (log_path != NULL && append_health_report(log_path, &report) != 0) {
             if (errno == EINVAL) {
@@ -280,7 +478,9 @@ int main(int argc, char **argv)
         } else {
             web_server_update(&server, &report, NULL);
         }
-        if (stop_requested || wait_interval(interval_seconds) < 0) {
+        if (stop_requested ||
+            wait_for_input_or_timeout(interval_seconds, &input_open,
+                                      &browser_child) < 0) {
             if (!stop_requested) {
                 perror("Monitoring interval wait failed");
                 operation_failed = true;
@@ -289,6 +489,7 @@ int main(int argc, char **argv)
         }
     }
 
+    reap_browser(&browser_child);
     web_server_stop(&server);
     if (gpio_indicator_close(&indicator, gpio_error, sizeof(gpio_error)) < 0) {
         fprintf(stderr, "Could not ensure warning LED is off during cleanup: %s\n",
