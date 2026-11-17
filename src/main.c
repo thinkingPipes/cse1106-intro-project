@@ -231,7 +231,7 @@ int main(int argc, char **argv)
 
     WebServer server = {0};
     char web_error[256];
-    if (web_server_start(&server, host, port, web_root, web_error,
+    if (web_server_start(&server, host, port, web_root, log_path, web_error,
                          sizeof(web_error)) < 0) {
         fprintf(stderr, "Could not start HTTP server: %s\n", web_error);
         if (gpio_indicator_close(&indicator, gpio_error,
