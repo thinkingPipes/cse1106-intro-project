@@ -8,6 +8,7 @@ let latestHealth = null;
 let lastSampleKey = null;
 let requestInProgress = false;
 let trendChart = null;
+let currentThresholds = { cpu: null, memory: null, storage: null };
 
 const $ = id => document.getElementById(id);
 const formatTimestamp = value => {
@@ -75,6 +76,11 @@ function renderMetrics(data) {
   const cpu = data.cpu || {};
   const memory = data.memory || {};
   const filesystem = data.root_filesystem || {};
+  currentThresholds = {
+    cpu: cpu.warning_threshold_pct,
+    memory: memory.warning_threshold_pct,
+    storage: filesystem.warning_threshold_pct
+  };
   const memUsedKb = Number.isFinite(memory.total_kb) && Number.isFinite(memory.available_kb)
     ? Math.max(0, memory.total_kb - memory.available_kb) : null;
   const fsUsedBytes = Number.isFinite(filesystem.total_bytes) && Number.isFinite(filesystem.available_bytes)
@@ -87,6 +93,11 @@ function renderMetrics(data) {
   renderMetric({ key: 'storage', source: filesystem, pct: filesystem.used_pct, threshold: filesystem.warning_threshold_pct,
     detail: fsUsedBytes === null ? 'Measurement unavailable' : `${formatCapacity(fsUsedBytes, 'GB')} used`,
     capacity: Number.isFinite(filesystem.total_bytes) ? `of ${formatCapacity(filesystem.total_bytes, 'GB')}` : '—' });
+  renderPressure([
+    { name: 'CPU', key: 'cpu', available: cpu.available, value: cpu.used_pct, threshold: cpu.warning_threshold_pct },
+    { name: 'Memory', key: 'memory', available: memory.available, value: memory.used_pct, threshold: memory.warning_threshold_pct },
+    { name: 'Filesystem', key: 'storage', available: filesystem.available, value: filesystem.used_pct, threshold: filesystem.warning_threshold_pct }
+  ]);
 
   const sampleTime = data.sampled_at;
   setText('last-sample', formatTimestamp(sampleTime));
@@ -100,6 +111,8 @@ function renderMetrics(data) {
     setText('status-title', 'Stale monitor sample');
     setText('status-description', 'Latest monitor sample is older than 15 seconds. Waiting for a newer reading.');
   }
+
+  updateTrend();
 
   // A timestamp identifies a completed backend sample. Repeated polls of that
   // same report do not create extra historical points; null timestamps cannot
@@ -117,17 +130,86 @@ function renderMetrics(data) {
   }
 }
 
+function renderPressure(metrics) {
+  const candidates = metrics.filter(metric => metric.available === true && Number.isFinite(metric.value) &&
+    Number.isFinite(metric.threshold) && metric.threshold > 0);
+  const state = $('pressure-state');
+  state.classList.remove('neutral', 'within', 'approaching', 'at-limit', 'exceeded', 'unavailable');
+  if (!candidates.length) {
+    state.textContent = 'NO AVAILABLE READINGS';
+    state.classList.add('unavailable');
+    setText('pressure-title', 'Threshold pressure unavailable');
+    setText('pressure-detail', 'No available measurements can be compared with their warning limits.');
+    setText('pressure-ratio', '—');
+    return;
+  }
+
+  const highest = candidates.reduce((current, metric) =>
+    metric.value / metric.threshold > current.value / current.threshold ? metric : current);
+  const ratio = highest.value / highest.threshold;
+  const ratioPercent = ratio * 100;
+  let stateClass;
+  let stateText;
+  let title;
+  let detail;
+  if (highest.value > highest.threshold) {
+    stateClass = 'exceeded';
+    stateText = 'THRESHOLD EXCEEDED';
+    title = `${highest.name} has exceeded its warning threshold`;
+    detail = `${highest.value.toFixed(1)}% used against a ${highest.threshold}% limit · ${(highest.value - highest.threshold).toFixed(1)} percentage points over`;
+  } else if (highest.value === highest.threshold) {
+    stateClass = 'at-limit';
+    stateText = 'AT WARNING LIMIT';
+    title = `${highest.name} is at its warning threshold`;
+    detail = `${highest.value.toFixed(1)}% used · any increase will exceed the ${highest.threshold}% limit`;
+  } else if (ratio >= 0.8) {
+    stateClass = 'approaching';
+    stateText = 'APPROACHING LIMIT';
+    title = `${highest.name} is approaching its warning threshold`;
+    detail = `${highest.value.toFixed(1)}% used against a ${highest.threshold}% limit · ${(highest.threshold - highest.value).toFixed(1)} percentage points of headroom`;
+  } else {
+    stateClass = 'within';
+    stateText = 'WITHIN LIMITS';
+    title = `${highest.name} is closest to its warning threshold`;
+    detail = `${highest.value.toFixed(1)}% used against a ${highest.threshold}% limit · ${(highest.threshold - highest.value).toFixed(1)} percentage points of headroom`;
+  }
+  state.textContent = stateText;
+  state.classList.add(stateClass);
+  setText('pressure-title', title);
+  setText('pressure-detail', detail);
+  setText('pressure-ratio', `${ratioPercent.toFixed(0)}%`);
+}
+
 function updateTrend() {
   const labels = observedSamples.map(sample => {
     const date = new Date(sample.timestamp);
     return new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' }).format(date);
   });
-  setText('trend-description', `Samples observed during this browser session · ${observedSamples.length} ${observedSamples.length === 1 ? 'reading' : 'readings'}`);
+  setText('trend-description', `Most recent browser-session samples · ${observedSamples.length} ${observedSamples.length === 1 ? 'reading' : 'readings'} (max ${MAX_SESSION_POINTS})`);
+  const thresholdText = [
+    ['CPU', currentThresholds.cpu], ['Memory', currentThresholds.memory], ['Filesystem', currentThresholds.storage]
+  ].filter(([, threshold]) => Number.isFinite(threshold)).map(([name, threshold]) => `${name} ${threshold}%`).join(' · ');
+  setText('session-thresholds', thresholdText ? `Dashed lines show API warning limits: ${thresholdText}.` : 'Warning limits are not available from the monitor API.');
+  const rows = $('session-data-rows');
+  if (rows) {
+    rows.innerHTML = observedSamples.length ? observedSamples.map(sample => {
+      const time = formatTimestamp(sample.timestamp);
+      const value = reading => reading === null ? 'Unavailable' : `${reading.toFixed(1)}%`;
+      return `<tr><th scope="row">${time}</th><td>${value(sample.cpu)}</td><td>${value(sample.memory)}</td><td>${value(sample.storage)}</td></tr>`;
+    }).join('') : '<tr><td colspan="4">No timestamped samples observed yet.</td></tr>';
+  }
   if (!trendChart) return;
   trendChart.data.labels = labels;
   trendChart.data.datasets[0].data = observedSamples.map(point => point.cpu);
   trendChart.data.datasets[1].data = observedSamples.map(point => point.memory);
   trendChart.data.datasets[2].data = observedSamples.map(point => point.storage);
+  const thresholdValues = [currentThresholds.cpu, currentThresholds.memory, currentThresholds.storage];
+  const thresholdNames = ['CPU', 'Memory', 'Filesystem'];
+  thresholdValues.forEach((threshold, index) => {
+    const dataset = trendChart.data.datasets[index + 3];
+    dataset.label = `${thresholdNames[index]} warning limit${Number.isFinite(threshold) ? ` (${threshold}%)` : ''}`;
+    dataset.data = Number.isFinite(threshold) ? observedSamples.map(() => threshold) : observedSamples.map(() => null);
+  });
   trendChart.update('none');
 }
 
@@ -200,14 +282,17 @@ function initializeChart() {
     data: { labels: [], datasets: [
       { label: 'CPU', data: [], borderColor: '#4278e8', backgroundColor: gradient, fill: true, tension: .36, borderWidth: 2, pointRadius: 0, pointHoverRadius: 4, spanGaps: false },
       { label: 'Memory', data: [], borderColor: '#8063df', backgroundColor: 'transparent', tension: .36, borderWidth: 2, pointRadius: 0, pointHoverRadius: 4, spanGaps: false },
-      { label: 'Storage', data: [], borderColor: '#18a889', backgroundColor: 'transparent', tension: .36, borderWidth: 2, pointRadius: 0, pointHoverRadius: 4, spanGaps: false }
+      { label: 'Storage', data: [], borderColor: '#18a889', backgroundColor: 'transparent', tension: .36, borderWidth: 2, pointRadius: 0, pointHoverRadius: 4, spanGaps: false },
+      { label: 'CPU warning limit', data: [], borderColor: 'rgba(66,120,232,.72)', backgroundColor: 'transparent', borderDash: [6, 4], borderWidth: 1.5, pointRadius: 0, tension: 0, fill: false },
+      { label: 'Memory warning limit', data: [], borderColor: 'rgba(128,99,223,.72)', backgroundColor: 'transparent', borderDash: [6, 4], borderWidth: 1.5, pointRadius: 0, tension: 0, fill: false },
+      { label: 'Filesystem warning limit', data: [], borderColor: 'rgba(24,168,137,.72)', backgroundColor: 'transparent', borderDash: [6, 4], borderWidth: 1.5, pointRadius: 0, tension: 0, fill: false }
     ] },
     options: {
       responsive: true, maintainAspectRatio: false, interaction: { intersect: false, mode: 'index' },
       plugins: { legend: { display: false }, tooltip: { backgroundColor: '#172334', padding: 10, titleFont: { family: 'DM Sans', size: 10 }, bodyFont: { family: 'DM Mono', size: 10 }, callbacks: { label: item => ` ${item.dataset.label}: ${item.formattedValue}%` } } },
       scales: {
         x: { grid: { display: false }, border: { display: false }, ticks: { color: '#9aa4b2', maxTicksLimit: 6, font: { family: 'DM Mono', size: 9 }, maxRotation: 0 } },
-        y: { min: 0, max: 100, border: { display: false, dash: [3, 4] }, grid: { color: '#edf0f4', drawTicks: false }, ticks: { stepSize: 25, padding: 10, color: '#9aa4b2', font: { family: 'DM Mono', size: 9 }, callback: value => `${value}%` } }
+        y: { min: 0, max: 100, border: { display: false, dash: [3, 4] }, grid: { color: '#29384d', drawTicks: false }, ticks: { stepSize: 25, padding: 10, color: '#9aabc1', font: { family: 'DM Mono', size: 9 }, callback: value => `${value}%` } }
       }
     }
   });

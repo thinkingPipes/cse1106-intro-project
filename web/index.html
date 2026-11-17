@@ -46,6 +46,12 @@
         <div class="status-meta"><span class="pulse-dot" id="sample-dot"></span><span>Last sample</span><strong id="last-sample">No sample received</strong></div>
       </section>
 
+      <section class="pressure-banner" id="pressure-banner" aria-live="polite" aria-label="Resource closest to its warning threshold">
+        <div class="pressure-icon" aria-hidden="true">⌁</div>
+        <div class="pressure-copy"><div class="pressure-heading"><span class="pressure-kicker">HIGHEST THRESHOLD PRESSURE</span><span class="pressure-state neutral" id="pressure-state">WAITING FOR DATA</span></div><h2 id="pressure-title">Evaluating resource thresholds</h2><p id="pressure-detail">The closest available metric will appear here.</p></div>
+        <div class="pressure-ratio"><strong id="pressure-ratio">—</strong><span>of warning limit</span></div>
+      </section>
+
       <section class="section-heading" id="resources"><div><h2>Resource utilization</h2><p>Current usage across your system</p></div><span class="update-label"><span class="pulse-dot"></span> POLLING EVERY 5 SEC</span></section>
 
       <section class="metric-grid" aria-label="Resource utilization metrics">
@@ -70,8 +76,13 @@
       </section>
 
       <section class="trend-card">
-        <div class="trend-header"><div><h2>Resource trends</h2><p id="trend-description">Samples observed during this browser session · 0 readings</p></div><div class="chart-legend"><span><i class="legend-dot blue"></i> CPU</span><span><i class="legend-dot purple"></i> Memory</span><span><i class="legend-dot green"></i> Storage</span></div></div>
-        <div class="chart-wrap"><canvas id="trend-chart" aria-label="Historical CPU, memory and storage utilization chart"></canvas></div>
+        <div class="trend-header"><div><h2>Resource trends</h2><p id="trend-description">Most recent browser-session samples · 0 readings (max 360)</p></div><div class="chart-legend"><span><i class="legend-dot blue"></i> CPU</span><span><i class="legend-dot purple"></i> Memory</span><span><i class="legend-dot green"></i> Storage</span><span><i class="threshold-key"></i> Warning limits</span></div></div>
+        <div class="chart-wrap"><canvas id="trend-chart" aria-describedby="trend-description" aria-label="Trend chart of CPU, memory, and filesystem utilization with dashed warning thresholds"></canvas></div>
+        <details class="chart-data">
+          <summary>View observed chart data as a table</summary>
+          <p class="table-thresholds" id="session-thresholds">Warning limits are supplied by the monitor API.</p>
+          <div class="table-scroll"><table><caption>Most recent distinct samples observed in this browser session, up to 360 readings</caption><thead><tr><th scope="col">Sample time</th><th scope="col">CPU</th><th scope="col">Memory</th><th scope="col">Filesystem</th></tr></thead><tbody id="session-data-rows"><tr><td colspan="4">No timestamped samples observed yet.</td></tr></tbody></table></div>
+        </details>
         <div class="chart-foot"><span><i class="pulse-dot" id="connection-dot"></i><span id="connection-text">Connecting to API</span></span><span>Session observations only · no persistent history</span></div>
       </section>
       <footer class="footer"><span>Northstar Monitoring <span class="footer-sep">·</span> Local system</span><span>API status <span class="connection-indicator" id="api-status"><i></i> Connecting</span></span></footer>
