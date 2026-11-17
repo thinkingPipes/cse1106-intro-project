@@ -14,8 +14,9 @@ read-only JSON API through an embedded CivetWeb server.
   handlers. `src/web_api.c` serializes report snapshots as JSON.
 - `src/main.c` coordinates sampling, GPIO updates, CSV logging, and the web
   server. Request handlers read a mutex-protected copy of the latest report.
-- `web/` contains the placeholder HTML, CSS, and JavaScript. The frontend is
-  intentionally unfinished in this milestone.
+- `web/` contains the responsive dashboard. It reads current health and metric
+  data from `/api/health` and `/api/metrics`; trend points are collected only
+  during the browser session.
 
 ## Build and run
 
