@@ -200,17 +200,33 @@ df -h /
 ```
 
 Record the dashboard's root filesystem percentage and the `Use%` value from
-the `df` output at approximately the same time.
+the `df` output at approximately the same time. The dashboard percentage is
+calculated from `statvfs` total blocks and `f_bavail` (space available to
+unprivileged users). Reserved filesystem blocks and filesystem-specific
+accounting can therefore make it differ from `df`'s `Use%` by more than
+rounding alone.
 
-**Expected observations:** Both readings describe the root filesystem and
-should be close. Small differences can result from percentage rounding and
-from the two measurements being taken at slightly different times.
+**Expected observations:** The readings refer to the same root filesystem and
+should describe broadly consistent usage, but they need not match exactly.
+Compare the dashboard percentage with the API's `root_filesystem.total_bytes`
+and `root_filesystem.available_bytes` from `/api/metrics`, which use the same
+`statvfs` values as the dashboard. Compare the API's available bytes with
+`df`'s `Avail` column, allowing for `df -h` unit rounding. Interpret `df`'s
+`Use%` separately because reserved blocks and filesystem accounting affect
+that percentage. A stable reading consistent with those source values is a
+better correctness check than exact equality with `Use%`.
 
-**Pass:** The dashboard and `df -h /` report broadly consistent root
-filesystem usage.
+**Pass:** The dashboard percentage is consistent with its API total and
+available byte values, and the API available value is broadly consistent with
+`df`'s `Avail` column after allowing for display rounding. The dashboard and
+`df` describe the same root filesystem; an exact match with `Use%` is not
+required.
 
-**Fail:** The values differ substantially when measured close together and
-repeated after confirming that both readings refer to `/`.
+**Fail:** The dashboard percentage does not agree with its API total and
+available byte values, or the API's available byte value differs substantially
+from `df`'s `Avail` after allowing for unit rounding and confirming both refer
+to `/`. A difference between the dashboard percentage and `df`'s `Use%` alone
+is not a failure.
 
 **Safety:** This test is read-only. Do not fill the SD card, create large test
 files, or otherwise intentionally consume filesystem capacity.

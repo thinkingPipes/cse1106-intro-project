@@ -51,8 +51,12 @@
   test child output, completion status, continued sampling, and `q`/SIGINT
   shutdown of an active child process group. Do not use real stress commands
   for this software-only check.
-- Run `sh -n tests/cpu_escalation.sh tests/ram_escalation.sh` to check script
-  syntax without starting a stress test.
+- Run `tests/test_sampling_interval.sh` after `make integration-build`. It uses
+  mock GPIO and fake stress commands to verify a five-second interval, live
+  keyboard input, child completion, and sampling while a child test runs.
+- Run `sh -n` on `tests/cpu_escalation.sh`, `tests/ram_escalation.sh`, and
+  `tests/test_sampling_interval.sh` to check shell syntax without starting a
+  real stress test.
 
 ## Raspberry Pi manual verification
 

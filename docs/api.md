@@ -1,9 +1,11 @@
 # HTTP API Contract
 
-API version 1 is read-only. The server serves these routes over HTTP; both
-successful endpoints accept `GET`, return `application/json; charset=utf-8`,
-and return the latest completed monitoring sample. A request handler copies a
-mutex-protected report snapshot and does not collect metrics.
+API version 1 is read-only. All three routes accept `GET` and return
+`application/json; charset=utf-8`. `/api/health` and `/api/metrics` return the
+latest completed monitoring sample. `/api/history` returns recent valid rows
+from the configured CSV log, or an empty sample list when no log is configured.
+Request handlers do not collect metrics; the health and metrics handlers copy
+a mutex-protected report snapshot.
 
 The `api_version` field is the integer `1`. Field names, types, null rules, and
 units below describe the JSON emitted by `src/web_api.c`.

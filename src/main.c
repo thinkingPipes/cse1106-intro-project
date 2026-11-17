@@ -482,19 +482,37 @@ static bool handle_control_line(char *line, bool *test_menu_open,
     return !stop_requested;
 }
 
-/* Poll stdin until the next sample deadline; completed terminal lines are
- * available after Enter when the terminal is in its normal canonical mode. */
-static int wait_for_input_or_timeout(unsigned int seconds, bool *input_open,
-                                     pid_t *browser_child,
-                                     bool *test_menu_open,
-                                     RunningTest *running_test)
+static bool timespec_is_at_or_after(const struct timespec *left,
+                                    const struct timespec *right)
 {
-    struct timespec deadline;
-    if (clock_gettime(CLOCK_MONOTONIC, &deadline) < 0) {
+    return left->tv_sec > right->tv_sec ||
+           (left->tv_sec == right->tv_sec &&
+            left->tv_nsec >= right->tv_nsec);
+}
+
+/* Keep sampling on an absolute schedule and skip missed ticks instead of
+ * adding the work time to every interval. */
+static int advance_sample_deadline(struct timespec *deadline,
+                                  unsigned int interval_seconds)
+{
+    struct timespec now;
+    if (clock_gettime(CLOCK_MONOTONIC, &now) < 0) {
         return -1;
     }
-    deadline.tv_sec += (time_t)seconds;
+    do {
+        deadline->tv_sec += (time_t)interval_seconds;
+    } while (timespec_is_at_or_after(&now, deadline));
+    return 0;
+}
 
+/* Poll stdin until the next sample deadline; completed terminal lines are
+ * available after Enter when the terminal is in its normal canonical mode. */
+static int wait_for_input_until(const struct timespec *deadline,
+                                bool *input_open,
+                                pid_t *browser_child,
+                                bool *test_menu_open,
+                                RunningTest *running_test)
+{
     char line[128];
     size_t line_length = 0;
     bool discard_line = false;
@@ -505,8 +523,8 @@ static int wait_for_input_or_timeout(unsigned int seconds, bool *input_open,
         if (clock_gettime(CLOCK_MONOTONIC, &now) < 0) {
             return -1;
         }
-        time_t remaining_seconds = deadline.tv_sec - now.tv_sec;
-        long remaining_nanoseconds = deadline.tv_nsec - now.tv_nsec;
+        time_t remaining_seconds = deadline->tv_sec - now.tv_sec;
+        long remaining_nanoseconds = deadline->tv_nsec - now.tv_nsec;
         if (remaining_nanoseconds < 0) {
             --remaining_seconds;
             remaining_nanoseconds += 1000000000L;
@@ -532,7 +550,8 @@ static int wait_for_input_or_timeout(unsigned int seconds, bool *input_open,
         };
         int poll_result = poll(&input, 1, (int)timeout_ms);
         if (poll_result == 0) {
-            return 0;
+            /* A 500 ms child check is not a sampling deadline. */
+            continue;
         }
         if (poll_result < 0) {
             if (errno == EINTR && !stop_requested) {
@@ -794,6 +813,12 @@ int main(int argc, char **argv)
     RunningTest running_test = {.pid = -1, .test_id = 0, .name = NULL};
 
     CpuSampleState cpu_state = {0};
+    struct timespec next_sample_deadline;
+    if (clock_gettime(CLOCK_MONOTONIC, &next_sample_deadline) < 0) {
+        perror("Could not set monitoring deadline");
+        operation_failed = true;
+        stop_requested = 1;
+    }
     while (!stop_requested) {
         HealthReport report;
         collect_health_report(&report, warning_threshold_pct,
@@ -827,9 +852,17 @@ int main(int argc, char **argv)
             web_server_update(&server, &report, NULL);
         }
         if (stop_requested ||
-            wait_for_input_or_timeout(interval_seconds, &input_open,
-                                      &browser_child, &test_menu_open,
-                                      &running_test) < 0) {
+            advance_sample_deadline(&next_sample_deadline,
+                                    interval_seconds) < 0) {
+            if (!stop_requested) {
+                perror("Could not advance monitoring deadline");
+                operation_failed = true;
+            }
+            break;
+        }
+        if (wait_for_input_until(&next_sample_deadline, &input_open,
+                                 &browser_child, &test_menu_open,
+                                 &running_test) < 0) {
             if (!stop_requested) {
                 perror("Monitoring interval wait failed");
                 operation_failed = true;
