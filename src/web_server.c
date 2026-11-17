@@ -5,6 +5,7 @@
 
 #include <civetweb.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 static void set_error(char *error, size_t error_size, const char *message)
@@ -104,8 +105,33 @@ static int metrics_handler(struct mg_connection *connection, void *data)
     return serialize_snapshot(connection, data, true);
 }
 
+static int history_handler(struct mg_connection *connection, void *data)
+{
+    WebServer *server = data;
+    const struct mg_request_info *request = mg_get_request_info(connection);
+    if (request == NULL || request->local_uri == NULL || strcmp(request->local_uri, "/api/history") != 0)
+        return send_api_error(connection, 404, "Not Found", "not_found", "API endpoint not found");
+    if (request->request_method == NULL || strcmp(request->request_method, "GET") != 0)
+        return send_api_error(connection, 405, "Method Not Allowed", "method_not_allowed", "Only GET is supported");
+    size_t limit;
+    if (web_api_parse_history_limit(request->query_string, &limit) != 0)
+        return send_api_error(connection, 400, "Bad Request", "invalid_limit", "limit must be an integer from 1 to 1000");
+    HistorySample *samples = calloc(limit, sizeof(*samples));
+    size_t capacity = 256 + limit * 192;
+    char *body = malloc(capacity);
+    if (samples == NULL || body == NULL) { free(samples); free(body); return send_api_error(connection, 500, "Internal Server Error", "history_unavailable", "Could not read history"); }
+    size_t count = 0;
+    if (web_api_read_history(server->history_path[0] ? server->history_path : NULL, limit, samples, &count) != 0) {
+        free(samples); free(body); return send_api_error(connection, 500, "Internal Server Error", "history_unavailable", "Could not read history");
+    }
+    int length = web_api_history_json(samples, count, body, capacity);
+    free(samples);
+    if (length < 0) { free(body); return send_api_error(connection, 500, "Internal Server Error", "serialization_failed", "Could not serialize history"); }
+    int result = send_json(connection, body, length); free(body); return result;
+}
+
 int web_server_start(WebServer *server, const char *host, unsigned int port,
-                     const char *document_root, char *error,
+                     const char *document_root, const char *history_path, char *error,
                      size_t error_size)
 {
     if (server == NULL || host == NULL || host[0] == '\0' || port == 0 ||
@@ -114,6 +140,10 @@ int web_server_start(WebServer *server, const char *host, unsigned int port,
         return -1;
     }
     memset(server, 0, sizeof(*server));
+    if (history_path != NULL && strlen(history_path) >= sizeof(server->history_path)) {
+        set_error(error, error_size, "history path is too long"); return -1;
+    }
+    if (history_path != NULL) (void)snprintf(server->history_path, sizeof(server->history_path), "%s", history_path);
     if (pthread_mutex_init(&server->report_mutex, NULL) != 0) {
         set_error(error, error_size, "could not initialize report mutex");
         return -1;
@@ -152,6 +182,8 @@ int web_server_start(WebServer *server, const char *host, unsigned int port,
     mg_set_request_handler(server->context, "/api/health", health_handler,
                            server);
     mg_set_request_handler(server->context, "/api/metrics", metrics_handler,
+                           server);
+    mg_set_request_handler(server->context, "/api/history", history_handler,
                            server);
     return 0;
 }

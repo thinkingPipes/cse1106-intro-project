@@ -11,7 +11,7 @@ ifneq ($(shell $(PKG_CONFIG) --atleast-version=2.0 libgpiod 2>/dev/null && echo 
   GPIOD_CPPFLAGS := -DGPIOD_API_V2
 endif
 
-SOURCES := src/main.c src/monitor.c src/gpio_indicator.c src/web_server.c src/web_api.c
+SOURCES := src/main.c src/monitor.c src/gpio_indicator.c src/web_server.c src/web_api.c src/web_history.c
 TARGET := .build/health-monitor
 TEST_TARGET := .build/test_monitor
 API_TEST_TARGET := .build/test_web_api
@@ -31,10 +31,10 @@ test: $(TEST_TARGET) $(API_TEST_TARGET)
 	$(API_TEST_TARGET)
 
 $(TEST_TARGET): tests/test_monitor.c src/monitor.c src/gpio_indicator.c include/health_monitor.h include/gpio_indicator.h | .build
-	$(CC) $(CPPFLAGS) -DHEALTH_MONITOR_TEST $(CFLAGS) tests/test_monitor.c src/monitor.c src/gpio_indicator.c $(LDFLAGS) -o $@
+	$(CC) $(CPPFLAGS) -DHEALTH_MONITOR_TEST $(CFLAGS) tests/test_monitor.c src/monitor.c src/gpio_indicator.c $(LDFLAGS) -pthread -o $@
 
-$(API_TEST_TARGET): tests/test_web_api.c src/web_api.c src/monitor.c include/health_monitor.h include/web_api.h | .build
-	$(CC) $(CPPFLAGS) $(CFLAGS) tests/test_web_api.c src/web_api.c src/monitor.c $(LDFLAGS) -o $@
+$(API_TEST_TARGET): tests/test_web_api.c src/web_api.c src/web_history.c src/monitor.c include/health_monitor.h include/web_api.h | .build
+	$(CC) $(CPPFLAGS) $(CFLAGS) tests/test_web_api.c src/web_api.c src/web_history.c src/monitor.c $(LDFLAGS) -pthread -lm -o $@
 
 .build:
 	mkdir -p .build

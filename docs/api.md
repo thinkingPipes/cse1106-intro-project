@@ -73,6 +73,35 @@ Example shape when metric sources are unavailable:
 {"api_version":1,"status":"UNKNOWN","sampled_at":null,"cpu":{"available":false,"used_pct":null,"warning_threshold_pct":60},"memory":{"available":false,"total_kb":null,"available_kb":null,"used_pct":null,"warning_threshold_pct":70},"root_filesystem":{"available":false,"total_bytes":null,"available_bytes":null,"used_pct":null,"warning_threshold_pct":70}}
 ```
 
+## `GET /api/history`
+
+Returns up to `limit` most recent valid CSV samples in chronological order.
+`limit` defaults to 120 and must be an unsigned decimal integer from 1 to
+1000. Invalid, repeated, or additional query parameters return HTTP 400.
+When no log path is configured, the CSV file is missing, or it has no valid
+records, the endpoint returns HTTP 200 with an empty `samples` array. Malformed
+CSV rows are skipped. CSV reads and writes share a process mutex.
+
+The response fields are:
+
+| Field | JSON type | Meaning |
+|---|---|---|
+| `api_version` | integer | Always `1`. |
+| `samples` | array | Most recent valid records, oldest first. |
+| `samples[].sampled_at` | string | UTC CSV timestamp, `YYYY-MM-DDTHH:MM:SSZ`. |
+| `samples[].status` | string | `HEALTHY`, `WARNING`, or `UNKNOWN`. |
+| `samples[].memory_used_pct` | number or null | Memory utilization percent, one decimal; null for unavailable measurement. |
+| `samples[].root_used_pct` | number or null | Root filesystem utilization percent, one decimal; null when unavailable. |
+| `samples[].warning_threshold_pct` | integer | Memory/storage warning threshold percent. |
+| `samples[].cpu_used_pct` | number or null | CPU utilization percent, one decimal; null when unavailable. |
+| `samples[].cpu_warning_threshold_pct` | integer | CPU warning threshold percent. |
+
+Example:
+
+```json
+{"api_version":1,"samples":[{"sampled_at":"2026-11-17T19:28:04Z","status":"HEALTHY","memory_used_pct":17.9,"root_used_pct":11.5,"warning_threshold_pct":70,"cpu_used_pct":14.9,"cpu_warning_threshold_pct":60},{"sampled_at":"2026-11-17T19:29:04Z","status":"UNKNOWN","memory_used_pct":null,"root_used_pct":11.5,"warning_threshold_pct":70,"cpu_used_pct":null,"cpu_warning_threshold_pct":60}]}
+```
+
 ## API errors
 
 API requests using a method other than GET return HTTP 405 and JSON with

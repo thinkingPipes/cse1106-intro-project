@@ -3,6 +3,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <pthread.h>
 
 typedef enum {
     HEALTH_UNKNOWN,
@@ -41,6 +42,7 @@ bool update_cpu_utilization(CpuSampleState *state, uint64_t total_ticks,
 HealthStatus evaluate_health_status(const HealthReport *report);
 void print_health_report(const HealthReport *report);
 int append_health_report(const char *path, const HealthReport *report);
+extern pthread_mutex_t health_csv_mutex;
 const char *health_status_name(HealthStatus status);
 
 #endif
