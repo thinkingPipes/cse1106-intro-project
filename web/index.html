@@ -41,40 +41,40 @@
       </section>
 
       <section class="status-banner" aria-label="System health">
-        <div class="status-icon"><span>✓</span></div>
-        <div class="status-copy"><div class="status-line"><strong>All systems operational</strong><span class="health-badge healthy" id="overall-status">HEALTHY</span></div><p>No issues detected across monitored resources.</p></div>
-        <div class="status-meta"><span class="pulse-dot"></span><span>Sample preview</span><strong id="last-sample">Today, 10:42:18 AM</strong></div>
+        <div class="status-icon" id="status-icon"><span>…</span></div>
+        <div class="status-copy"><div class="status-line"><strong id="status-title">Waiting for monitor</strong><span class="health-badge unknown" id="overall-status">UNKNOWN</span></div><p id="status-description">Connecting to the equipment monitor…</p></div>
+        <div class="status-meta"><span class="pulse-dot" id="sample-dot"></span><span>Last sample</span><strong id="last-sample">No sample received</strong></div>
       </section>
 
-      <section class="section-heading" id="resources"><div><h2>Resource utilization</h2><p>Current usage across your system</p></div><span class="update-label"><span class="pulse-dot"></span> UPDATING EVERY 5 MIN</span></section>
+      <section class="section-heading" id="resources"><div><h2>Resource utilization</h2><p>Current usage across your system</p></div><span class="update-label"><span class="pulse-dot"></span> POLLING EVERY 5 SEC</span></section>
 
       <section class="metric-grid" aria-label="Resource utilization metrics">
         <article class="metric-card" data-metric="cpu">
           <div class="metric-top"><div class="metric-title"><span class="metric-icon cpu-icon">⌘</span><div><h3>CPU usage</h3><span class="metric-caption">Processor utilization</span></div></div><button class="more-button" aria-label="CPU options">···</button></div>
-          <div class="gauge-wrap"><div class="gauge" style="--value:38.4;--gauge-color:#4278e8"><div class="gauge-inner"><strong>38.4<span>%</span></strong><small>IN USE</small></div></div></div>
-          <div class="metric-bottom"><span><i class="legend-dot blue"></i> Current usage</span><strong>38.4%</strong></div>
-          <div class="threshold"><span>Warning threshold</span><strong>60%</strong></div>
+          <div class="gauge-wrap"><div class="gauge unavailable" id="cpu-gauge" style="--value:0;--gauge-color:#4278e8"><div class="gauge-inner"><strong id="cpu-value">—</strong><small id="cpu-gauge-label">UNAVAILABLE</small></div></div></div>
+          <div class="metric-bottom"><span><i class="legend-dot blue"></i> Current usage</span><strong id="cpu-detail">No reading</strong></div>
+          <div class="threshold"><span>Warning threshold</span><strong id="cpu-threshold">—</strong></div>
         </article>
         <article class="metric-card" data-metric="memory">
           <div class="metric-top"><div class="metric-title"><span class="metric-icon memory-icon">▤</span><div><h3>Memory usage</h3><span class="metric-caption">System memory</span></div></div><button class="more-button" aria-label="Memory options">···</button></div>
-          <div class="gauge-wrap"><div class="gauge" style="--value:64.2;--gauge-color:#8063df"><div class="gauge-inner"><strong>64.2<span>%</span></strong><small>IN USE</small></div></div></div>
-          <div class="metric-bottom"><span><i class="legend-dot purple"></i> 10.5 GB used</span><strong>of 16.3 GB</strong></div>
-          <div class="threshold"><span>Warning threshold</span><strong>70%</strong></div>
+          <div class="gauge-wrap"><div class="gauge unavailable" id="memory-gauge" style="--value:0;--gauge-color:#8063df"><div class="gauge-inner"><strong id="memory-value">—</strong><small id="memory-gauge-label">UNAVAILABLE</small></div></div></div>
+          <div class="metric-bottom"><span><i class="legend-dot purple"></i><span id="memory-detail">No reading</span></span><strong id="memory-capacity">—</strong></div>
+          <div class="threshold"><span>Warning threshold</span><strong id="memory-threshold">—</strong></div>
         </article>
         <article class="metric-card" data-metric="storage">
           <div class="metric-top"><div class="metric-title"><span class="metric-icon storage-icon">▰</span><div><h3>Storage usage</h3><span class="metric-caption">Root filesystem</span></div></div><button class="more-button" aria-label="Storage options">···</button></div>
-          <div class="gauge-wrap"><div class="gauge" style="--value:48.7;--gauge-color:#18a889"><div class="gauge-inner"><strong>48.7<span>%</span></strong><small>IN USE</small></div></div></div>
-          <div class="metric-bottom"><span><i class="legend-dot green"></i> 362 GB used</span><strong>of 743 GB</strong></div>
-          <div class="threshold"><span>Warning threshold</span><strong>70%</strong></div>
+          <div class="gauge-wrap"><div class="gauge unavailable" id="storage-gauge" style="--value:0;--gauge-color:#18a889"><div class="gauge-inner"><strong id="storage-value">—</strong><small id="storage-gauge-label">UNAVAILABLE</small></div></div></div>
+          <div class="metric-bottom"><span><i class="legend-dot green"></i><span id="storage-detail">No reading</span></span><strong id="storage-capacity">—</strong></div>
+          <div class="threshold"><span>Warning threshold</span><strong id="storage-threshold">—</strong></div>
         </article>
       </section>
 
       <section class="trend-card">
-        <div class="trend-header"><div><h2>Resource trends</h2><p>Usage history for the current session</p></div><div class="chart-legend"><span><i class="legend-dot blue"></i> CPU</span><span><i class="legend-dot purple"></i> Memory</span><span><i class="legend-dot green"></i> Storage</span></div></div>
+        <div class="trend-header"><div><h2>Resource trends</h2><p id="trend-description">Samples observed during this browser session · 0 readings</p></div><div class="chart-legend"><span><i class="legend-dot blue"></i> CPU</span><span><i class="legend-dot purple"></i> Memory</span><span><i class="legend-dot green"></i> Storage</span></div></div>
         <div class="chart-wrap"><canvas id="trend-chart" aria-label="Historical CPU, memory and storage utilization chart"></canvas></div>
-        <div class="chart-foot"><span><i class="pulse-dot"></i> Mock data preview</span><span>Values shown as percentage of total capacity</span></div>
+        <div class="chart-foot"><span><i class="pulse-dot" id="connection-dot"></i><span id="connection-text">Connecting to API</span></span><span>Session observations only · no persistent history</span></div>
       </section>
-      <footer class="footer"><span>Northstar Monitoring <span class="footer-sep">·</span> Visual design preview</span><span>Data source <span class="connection-indicator"><i></i> Mock sample</span></span></footer>
+      <footer class="footer"><span>Northstar Monitoring <span class="footer-sep">·</span> Local system</span><span>API status <span class="connection-indicator" id="api-status"><i></i> Connecting</span></span></footer>
     </main>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
