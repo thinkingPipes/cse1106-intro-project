@@ -2,35 +2,36 @@
 
 ## Purpose
 
-Provide a simple command-line health snapshot for a Raspberry Pi or compatible
-Linux machine.
+Demonstrate C11 programming, Linux system monitoring, and physical GPIO
+interaction on a Raspberry Pi or compatible Linux system. The monitor provides
+a read-only HTTP presentation layer over the existing C monitoring engine.
 
 ## Functional requirements
 
-- Report CPU temperature, available memory, root filesystem usage, one-minute
-  system load, and uptime when the operating system exposes those metrics.
-- Show unavailable readings as `N/A`; do not present missing values as zero.
-- Compare memory and root-filesystem utilization (percentage used) against one
-  configurable warning threshold, defaulting to 80% and accepting integer
-  values from 1 through 100. Warn when either resource exceeds the threshold;
-  an exact match remains healthy.
-- Evaluate CPU temperature thresholds and display an overall `HEALTHY`,
-  `WARNING`, `CRITICAL`, or `UNKNOWN` status.
-- Optionally append each report to a CSV file using `--log FILE`.
-- Drive GPIO 17 HIGH for `WARNING` (and `CRITICAL`) and LOW for `HEALTHY`;
-  attempt to leave it LOW during cleanup.
-- Support an explicit `--no-gpio` mode for development without physical GPIO.
-- Support `--mock-gpio` to simulate and display GPIO output requests without
-  physical hardware.
-- Report GPIO initialization or update failures and exit non-zero rather than
-  claiming the LED operated successfully.
-- Print usage information with `--help` and reject invalid thresholds,
-  unknown options, or incomplete options.
+- Collect CPU utilization from `/proc/stat`, memory use from `/proc/meminfo`,
+  and root-filesystem use through `statvfs`.
+- Preserve separate CPU (default 60%) and memory/storage (default 70%) warning
+  thresholds. A value warns only when it exceeds its threshold.
+- Report `HEALTHY`, `WARNING`, or `UNKNOWN`; unavailable measurements must not
+  be represented as zero.
+- Optionally append each sample to CSV with `--log FILE`.
+- Drive GPIO 17 HIGH for `WARNING` and LOW for other statuses, and attempt to
+  leave it LOW during cleanup. Initialization and update failures are reported.
+- Serve static assets from a configurable web root and expose read-only
+  `GET /api/health` and `GET /api/metrics` endpoints returning JSON.
+- Support configurable IPv4 bind address and port. The default bind address
+  is loopback. No remote administrative or GPIO-control routes are provided.
+- Keep collection and threshold evaluation in the C11 monitoring engine.
+  HTTP handlers must read a synchronized snapshot and must not collect metrics.
+- Stop the HTTP server and release its resources cleanly on SIGINT/SIGTERM.
 
-## Platform requirements
+## Platform and dependencies
 
-- Linux with a C11 compiler.
-- Read access to `/proc/meminfo`, `/proc/loadavg`, `/proc/uptime`,
-  `/sys/class/thermal/thermal_zone0/temp`, and root filesystem statistics.
-- Missing individual sources must not prevent other available readings from
-  being reported.
+- Linux, C11 compiler, Make, and pkg-config.
+- libgpiod for physical GPIO and CivetWeb for embedded HTTP/static file
+  serving. ncurses is not used.
+- Read access to `/proc/stat`, `/proc/meminfo`, root filesystem statistics,
+  and access to the GPIO chip for the warning LED.
+
+Temperature, swap, OS metadata, network throughput, historical analytics,
+authentication, and a finished dashboard are outside this milestone.

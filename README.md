@@ -1,67 +1,86 @@
 # Raspberry Pi Equipment Health Monitor
 
-A lightweight Linux monitor for CPU, memory, and root-filesystem utilization. It reports `HEALTHY` or `WARNING`, controls a physical warning LED on BCM GPIO 17, and can append each report to a CSV log.
+A C11 Linux monitor for CPU, memory, and root-filesystem utilization. It
+evaluates health thresholds, controls a physical warning LED on BCM GPIO 17,
+optionally appends reports to CSV, and serves a small browser entry page plus a
+read-only JSON API through an embedded CivetWeb server.
 
-## Project structure
+## Architecture
 
-- `src/main.c` — command-line options, continuous sampling, signal handling, and output coordination
-- `src/monitor.c` — CPU, memory, and filesystem collection, status evaluation, and CSV logging
-- `src/gpio_indicator.c` — physical GPIO 17 LED control through libgpiod
-- `include/` — shared monitor and GPIO interfaces
-- `Makefile` — build configuration requiring libgpiod development files
-- `docs/` — requirements, design, and change log
-- `tests/` — automated status/GPIO tests and manual verification plan
+- `src/monitor.c` collects CPU, memory, and root-filesystem metrics, evaluates
+  status, and appends CSV reports.
+- `src/gpio_indicator.c` owns GPIO 17 setup, status updates, and cleanup.
+- `src/web_server.c` embeds CivetWeb, serves static assets, and provides HTTP
+  handlers. `src/web_api.c` serializes report snapshots as JSON.
+- `src/main.c` coordinates sampling, GPIO updates, CSV logging, and the web
+  server. Request handlers read a mutex-protected copy of the latest report.
+- `web/` contains the placeholder HTML, CSS, and JavaScript. The frontend is
+  intentionally unfinished in this milestone.
 
 ## Build and run
 
-Build on the Raspberry Pi with a C11 compiler, Make, libgpiod, and ncurses development files:
+Install a C11 compiler, Make, pkg-config, libgpiod development files, and
+CivetWeb development files. The Makefile expects pkg-config modules named
+`libgpiod` and `civetweb`.
 
 ```sh
 make
+./.build/health-monitor
 ```
 
-Run continuously in an interactive terminal for the ncurses dashboard. The default sampling interval is 5 seconds, and Ctrl+C stops the monitor cleanly. If ncurses cannot initialize or there is no interactive terminal, the monitor uses text output:
+The server defaults to `127.0.0.1:8080`, so it is only reachable from the Pi
+itself. `--host` accepts an IPv4 address. To access it from another computer
+on the local network, bind to all IPv4 interfaces and use the Pi's LAN address
+in the browser:
 
 ```sh
-./health-monitor
+./.build/health-monitor --host 0.0.0.0 --port 8080
 ```
 
-The RAM and root-filesystem threshold defaults to 70%. CPU has a separate 60% default. Set them independently; the first positional number is the RAM/storage threshold, and `--cpu-threshold` sets the CPU threshold. The sampling interval defaults to 5 seconds:
+The HTTP service has no authentication and exposes read-only health data and
+the static files under `web/`. Bind only to a trusted network and use firewall
+rules to limit access. No HTTP endpoint controls GPIO or changes monitor
+configuration. Use `--web-root DIR` if the process is started outside the
+project directory.
+
+The sample interval defaults to 5 seconds. The RAM/root-filesystem warning
+threshold defaults to 70%; CPU has a separate 60% default. A warning is raised
+only when a measured value is above its threshold. CPU utilization is
+unavailable on the first sample while `/proc/stat` establishes its baseline.
 
 ```sh
-./health-monitor 70 --cpu-threshold 85 --interval 10
+./.build/health-monitor 70 --cpu-threshold 85 --interval 10 --log data/health.csv
 ```
 
-CPU utilization is unavailable on the initial sample because it establishes a counter baseline; valid CPU percentages appear from the next sample onward. Append one CSV report per sample:
+Use `./.build/health-monitor --help` for all options. Ctrl+C or SIGTERM stops the
+server, turns the warning LED off, and releases GPIO resources.
 
-The dashboard shows CPU temperature as `N/A`; thermal data collection is not enabled. CPU history is retained for the latest 60 valid samples.
+## HTTP API contract
+
+The backend contract, exact field types and units, null behavior, error
+responses, and representative payloads are documented in
+[docs/api.md](docs/api.md). Both endpoints return the latest completed sample;
+request handlers do not collect metrics.
+
+## Warning LED
+
+Connect GPIO 17 (physical header pin 11) through a 1 kΩ resistor to the LED
+anode; connect the cathode to GND. GPIO HIGH indicates `WARNING`. The chip
+defaults to `/dev/gpiochip0`; set `HEALTH_MONITOR_GPIO_CHIP` if needed. The
+process must have permission to request GPIO 17. The program exits if GPIO
+initialization fails and reports update or cleanup failures.
+
+## Checks
 
 ```sh
-./health-monitor --log data/temperature_log.csv
+make test
 ```
 
-Run continuously in the background and save console output:
+The test target exercises health thresholds, mock GPIO behavior, CSV handling,
+and the JSON serializer. It does not require CivetWeb, ncurses, or physical GPIO.
 
-```sh
-nohup ./health-monitor --log data/temperature_log.csv > health-monitor.out 2>&1 & echo $! > health-monitor.pid
-```
-
-Stop the background process with SIGTERM so it can turn the LED off and release GPIO:
-
-```sh
-kill -TERM "$(cat health-monitor.pid)"
-```
-
-Run automated checks with `make test`.
-
-## Warning LED wiring
-
-Connect GPIO 17 (physical header pin 11) through a 1 kΩ resistor to the LED anode (long leg); connect the LED cathode (short leg) to a GND pin such as physical pin 6. GPIO HIGH turns the LED on and LOW turns it off. Wire with the Pi powered off. Raspberry Pi GPIO uses 3.3 V logic; do not connect a 5 V rail to a GPIO pin. The chip defaults to `/dev/gpiochip0`; if the system assigns the GPIO controller a different device path, set `HEALTH_MONITOR_GPIO_CHIP`.
-
-Install the libgpiod development package before building. The process must have permission to open the GPIO chip and request GPIO 17. The application reports GPIO errors and exits if physical GPIO initialization fails. The LED is on while either memory or storage is above the threshold and is turned off during normal shutdown.
-
-## Health threshold
-
-Memory use is calculated from `MemTotal` and `MemAvailable`; storage use is measured for the root filesystem. Either resource above the shared 70% default threshold produces `WARNING`. CPU utilization uses the aggregate `cpu` counters in `/proc/stat` and a separate 60% default threshold. A warning is raised only when a measured value is above its threshold. CPU counters are cumulative, so the first sample is a baseline; missing or invalid counter readings are not treated as zero. Both thresholds accept integer values from 1 to 100. If all three readings are unavailable, status is `UNKNOWN`.
-
-CSV output now includes CPU utilization and its threshold. Existing logs with the older header are left unchanged and rejected for appending; choose a new log filename when using the updated CSV format.
+To build the complete server and sampling loop with mock GPIO for local HTTP
+integration checks, run `make integration-build`; start it with
+`./.build/health-monitor-mock`. This verifies the software path without
+accessing GPIO hardware and does not replace the normal `health-monitor`
+executable.
