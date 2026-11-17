@@ -62,10 +62,10 @@ function renderMetric({ key, source, pct, threshold, detail, capacity }) {
   const available = source?.available === true && Number.isFinite(pct);
   const gauge = $(`${key}-gauge`);
   gauge.classList.toggle('unavailable', !available);
-  gauge.classList.toggle('over-threshold', available && pct >= threshold);
+  gauge.classList.toggle('over-threshold', available && pct > threshold);
   gauge.style.setProperty('--value', available ? Math.max(0, Math.min(100, pct)) : 0);
   setText(`${key}-value`, available ? `${pct.toFixed(1)}%` : '—');
-  setText(`${key}-gauge-label`, available ? (pct >= threshold ? 'WARNING' : 'IN USE') : 'UNAVAILABLE');
+  setText(`${key}-gauge-label`, available ? (pct > threshold ? 'WARNING' : 'IN USE') : 'UNAVAILABLE');
   setText(`${key}-threshold`, Number.isFinite(threshold) ? `${threshold}%` : '—');
   setText(`${key}-detail`, available ? detail : 'Measurement unavailable');
   if (capacity !== undefined) setText(`${key}-capacity`, available ? capacity : '—');
