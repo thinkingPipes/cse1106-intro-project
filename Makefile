@@ -5,8 +5,16 @@ CPPFLAGS += -Iinclude
 
 GPIOD_CFLAGS := $(shell $(PKG_CONFIG) --cflags libgpiod 2>/dev/null)
 GPIOD_LIBS := $(shell $(PKG_CONFIG) --libs libgpiod 2>/dev/null)
-CIVETWEB_CFLAGS := $(shell $(PKG_CONFIG) --cflags civetweb 2>/dev/null)
-CIVETWEB_LIBS := $(shell $(PKG_CONFIG) --libs civetweb 2>/dev/null)
+CIVETWEB_PKG_CONFIG := $(shell $(PKG_CONFIG) --exists civetweb 2>/dev/null && echo yes)
+ifeq ($(CIVETWEB_PKG_CONFIG),yes)
+  CIVETWEB_CFLAGS := $(shell $(PKG_CONFIG) --cflags civetweb)
+  CIVETWEB_LIBS := $(shell $(PKG_CONFIG) --libs civetweb)
+else
+  # Debian/Raspberry Pi OS ships CivetWeb headers and libraries with a CMake
+  # package, but some releases omit civetweb.pc.
+  CIVETWEB_CFLAGS :=
+  CIVETWEB_LIBS := -lcivetweb
+endif
 ifneq ($(shell $(PKG_CONFIG) --atleast-version=2.0 libgpiod 2>/dev/null && echo yes),)
   GPIOD_CPPFLAGS := -DGPIOD_API_V2
 endif
@@ -22,7 +30,7 @@ all: $(TARGET)
 
 $(TARGET): $(SOURCES) include/health_monitor.h include/gpio_indicator.h include/web_server.h include/web_api.h | .build
 	@$(PKG_CONFIG) --exists libgpiod || { echo "libgpiod development files are required for GPIO 17 support" >&2; exit 1; }
-	@$(PKG_CONFIG) --exists civetweb || { echo "CivetWeb development files are required for the HTTP server" >&2; exit 1; }
+	@printf '#include <civetweb.h>\n' | $(CC) -x c -E - >/dev/null 2>&1 || { echo "CivetWeb development headers are required for the HTTP server" >&2; exit 1; }
 	$(CC) $(CPPFLAGS) -DHAVE_LIBGPIOD $(GPIOD_CPPFLAGS) $(GPIOD_CFLAGS) $(CIVETWEB_CFLAGS) $(CFLAGS) $(SOURCES) $(LDFLAGS) $(GPIOD_LIBS) $(CIVETWEB_LIBS) -pthread -o $@
 
 .PHONY: test

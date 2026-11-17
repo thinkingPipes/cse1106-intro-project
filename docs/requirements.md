@@ -18,12 +18,17 @@ a read-only HTTP presentation layer over the existing C monitoring engine.
 - Drive GPIO 17 HIGH for `WARNING` and LOW for other statuses, and attempt to
   leave it LOW during cleanup. Initialization and update failures are reported.
 - Serve static assets from a configurable web root and expose read-only
-  `GET /api/health` and `GET /api/metrics` endpoints returning JSON.
+  `GET /api/health`, `GET /api/metrics`, and `GET /api/history` endpoints
+  returning JSON.
 - Support configurable IPv4 bind address and port. The default bind address
   is loopback. No remote administrative or GPIO-control routes are provided.
 - Keep collection and threshold evaluation in the C11 monitoring engine.
   HTTP handlers must read a synchronized snapshot and must not collect metrics.
 - Stop the HTTP server and release its resources cleanly on SIGINT/SIGTERM.
+- Provide an interactive `h` help, `t` test-menu, and `q` shutdown control.
+- Run the CPU and guarded RAM stress scripts as child processes so monitoring
+  continues; provide manual instructions for baseline, recovery, and filesystem
+  checks without filling storage.
 
 ## Platform and dependencies
 
@@ -33,5 +38,7 @@ a read-only HTTP presentation layer over the existing C monitoring engine.
 - Read access to `/proc/stat`, `/proc/meminfo`, root filesystem statistics,
   and access to the GPIO chip for the warning LED.
 
-Temperature, swap, OS metadata, network throughput, historical analytics,
-authentication, and a finished dashboard are outside this milestone.
+Temperature, swap, OS metadata, network throughput, remote administration, and
+authentication are outside this project. Dashboard trend history is limited
+to samples observed in the browser session; the API history route reads the
+configured CSV log when one is supplied.

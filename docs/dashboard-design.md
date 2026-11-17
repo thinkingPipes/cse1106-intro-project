@@ -157,13 +157,12 @@ read the threshold from the relevant API object. Use the same resource color
 for its metric card and trend line; warning state should be conveyed separately
 so a resource color does not imply health.
 
-The current API supplies only the latest completed sample. If no history
-endpoint is available, seed charts with clearly identified mock/demo data during
-development, or render an honest “Collecting history” empty state and populate
-a short rolling series from samples observed by the browser. Never imply that
-mock data is live or historical backend data. Do not assume or invent a future
-history endpoint schema. When a history endpoint becomes available, integrate
-only against its documented contract.
+The current dashboard builds a short rolling series from samples observed by
+the browser during that session. It does not use the persistent `/api/history`
+route for its chart. Keep the chart labels clear that these are session samples;
+never imply that mock data is live or that the chart shows persistent backend
+history. If the dashboard later uses `/api/history`, integrate against the
+contract documented in `docs/api.md`.
 
 Keep charts legible at their rendered size. Provide an accessible textual
 summary or data table alternative for chart values, and do not rely on hover

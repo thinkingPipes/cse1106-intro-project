@@ -6,21 +6,22 @@ on the actual equipment; they are not recorded as passed by this document.
 
 ## 1. Build preparation
 
-Install the platform's development packages for:
-
-- A C11 compiler, such as GCC or Clang.
-- GNU Make.
-- `pkg-config`.
-- libgpiod development headers and library; the Makefile looks for the
-  `libgpiod` pkg-config module.
-- CivetWeb development headers and library; the Makefile looks for the
-  `civetweb` pkg-config module.
-
-Package names differ between Linux distributions. Verify that both modules
-are visible before building:
+On Raspberry Pi OS, Debian, or Ubuntu, install the compiler, Make, pkg-config,
+and the libgpiod and CivetWeb development packages:
 
 ```sh
-pkg-config --modversion libgpiod civetweb
+sudo apt update
+sudo apt install build-essential pkg-config libgpiod-dev libcivetweb-dev
+```
+
+The Makefile requires the `libgpiod` pkg-config module. It uses a `civetweb`
+module if available, then falls back to the installed CivetWeb header and
+library when no `.pc` file is shipped. On Ubuntu, enable the Universe
+repository if these packages are not found. Install `stress-ng` separately if
+you will run the CPU or RAM stress tests:
+
+```sh
+sudo apt install stress-ng
 ```
 
 From the project directory, build the production application and optionally
@@ -143,6 +144,10 @@ Use the dashboard while the production process is running:
   table** and check sample times, percentages, and unavailable cells.
 - Confirm the trend label identifies browser-session samples and does not
   imply persistent history. The browser retains at most 360 distinct samples.
+- When the monitor is started with `--log FILE`, optionally verify
+  `GET /api/history?limit=10` returns recent CSV rows. Without a configured log,
+  that API route should return an empty sample list. The dashboard does not use
+  this endpoint for its trend chart.
 - Confirm the displayed sample time is derived from the API's UTC timestamp and
   presented in the browser's local time zone.
 
@@ -184,10 +189,9 @@ Mark each item only after observing it on the actual setup:
 
 ## 6. Known limitations
 
-- The historical `GET /api/history` endpoint is excluded from the dashboard.
-  Its optimized-build HTTP crash is unresolved; the current dashboard uses
-  browser-session observations only. Do not use the history endpoint for this
-  demonstration.
+- The dashboard's trend chart uses browser-session samples; persistent CSV
+  history is available through the separate API route only when `--log FILE`
+  is configured.
 - Browser rendering has not yet been visually verified. Check the actual Pi
   browser view at desktop and phone widths during acceptance.
 - The HTTP service has no authentication. Keep it on a trusted private LAN,

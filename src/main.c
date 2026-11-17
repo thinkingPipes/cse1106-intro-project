@@ -7,6 +7,7 @@
 #include <arpa/inet.h>
 #include <ctype.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <limits.h>
 #include <poll.h>
 #include <spawn.h>
@@ -14,6 +15,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/ioctl.h>
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
@@ -22,10 +24,87 @@ static volatile sig_atomic_t stop_requested;
 
 extern char **environ;
 
+typedef struct {
+    pid_t pid;
+    unsigned int test_id;
+    const char *name;
+} RunningTest;
+
 static void handle_stop_signal(int signal_number)
 {
     (void)signal_number;
     stop_requested = 1;
+}
+
+static unsigned int cli_width(void)
+{
+    struct winsize terminal_size = {0};
+    if (isatty(STDOUT_FILENO) &&
+        ioctl(STDOUT_FILENO, TIOCGWINSZ, &terminal_size) == 0 &&
+        terminal_size.ws_col > 0) {
+        return terminal_size.ws_col < 72 ? terminal_size.ws_col : 72;
+    }
+    return 72;
+}
+
+static void print_separator(char character)
+{
+    unsigned int width = cli_width();
+    for (unsigned int column = 0; column < width; ++column) {
+        putchar(character);
+    }
+    putchar('\n');
+}
+
+static void print_wrapped(const char *text, unsigned int indent)
+{
+    unsigned int width = cli_width();
+    if (indent >= width) {
+        indent = 0;
+    }
+    unsigned int column = indent;
+    for (unsigned int space = 0; space < indent; ++space) {
+        putchar(' ');
+    }
+
+    const char *word = text;
+    while (*word != '\0') {
+        while (isspace((unsigned char)*word)) {
+            ++word;
+        }
+        if (*word == '\0') {
+            break;
+        }
+        const char *end = word;
+        while (*end != '\0' && !isspace((unsigned char)*end)) {
+            ++end;
+        }
+        unsigned int length = (unsigned int)(end - word);
+        if (column > indent && column + 1 + length > width) {
+            putchar('\n');
+            for (unsigned int space = 0; space < indent; ++space) {
+                putchar(' ');
+            }
+            column = indent;
+        } else if (column > indent) {
+            putchar(' ');
+            ++column;
+        }
+
+        for (const char *character = word; character < end; ++character) {
+            if (column == width) {
+                putchar('\n');
+                for (unsigned int space = 0; space < indent; ++space) {
+                    putchar(' ');
+                }
+                column = indent;
+            }
+            putchar(*character);
+            ++column;
+        }
+        word = end;
+    }
+    putchar('\n');
 }
 
 static void print_usage(const char *program)
@@ -41,13 +120,33 @@ static void print_usage(const char *program)
     puts("  --cpu-threshold PCT  CPU warning threshold (integer 1-100; default 60)");
     puts("  THRESHOLD   RAM/storage warning threshold (integer 1-100; default 70)");
     puts("  --help      Show this help message");
+    puts("After startup, enter h for help, t for test menu, or q to quit.");
 }
 
 static void print_control_help(void)
 {
-    puts("\nCommands (press Enter after a command):");
-    puts("  h  Show this help");
-    puts("  q  Stop the monitor and web server");
+    putchar('\n');
+    print_separator('-');
+    puts("CONTROLS  (press Enter after a command)");
+    puts("  h  Show commands and test-menu help");
+    puts("  t  Open the hardware test menu");
+    puts("  q  Gracefully stop the monitor and web server");
+    puts("  Full procedures: docs/test-cases.md");
+    print_separator('-');
+}
+
+static void print_test_menu(void)
+{
+    putchar('\n');
+    print_separator('-');
+    puts("HARDWARE TESTS  (enter a number, then press Enter)");
+    puts("  1  CPU escalation (4 cores)");
+    puts("  2  RAM escalation (1 GB reserve)");
+    puts("  3  Healthy baseline");
+    puts("  4  Recovery after stress");
+    puts("  5  Filesystem check");
+    puts("  Full procedures: docs/test-cases.md");
+    print_separator('-');
 }
 
 static void print_startup_banner(const char *host, unsigned int port)
@@ -57,19 +156,27 @@ static void print_startup_banner(const char *host, unsigned int port)
         dashboard_host = "127.0.0.1";
     }
 
-    printf("\nRaspberry Pi Equipment Health Monitor\n");
-    puts("Web server started.");
-    printf("Dashboard: http://%s:%u/\n", dashboard_host, port);
+    putchar('\n');
+    print_separator('=');
+    puts("Raspberry Pi Equipment Health Monitor");
+    print_separator('=');
+    puts("\nSERVER");
+    puts("  Web server started and monitoring is active.");
+    puts("\nDASHBOARD");
+    printf("  http://%s:%u/\n", dashboard_host, port);
     if (strcmp(host, "0.0.0.0") == 0) {
-        printf("From another device, open http://<PI-LAN-IP>:%u/\n", port);
+        puts("  From another device:");
+        printf("  http://<PI-LAN-IP>:%u/\n", port);
     } else if (strcmp(host, "127.0.0.1") == 0) {
-        printf("For LAN access, restart with --host 0.0.0.0, then open\n");
-        printf("http://<PI-LAN-IP>:%u/ from the other device.\n", port);
+        puts("  LAN access: restart with --host 0.0.0.0, then use:");
+        printf("  http://<PI-LAN-IP>:%u/\n", port);
     } else {
-        printf("From another device on this network, open http://%s:%u/\n",
-               host, port);
+        puts("  From another device on this network:");
+        printf("  http://%s:%u/\n", host, port);
     }
-    print_control_help();
+    puts("\nCONTROLS");
+    puts("  h  Help     t  Test menu     q  Quit");
+    print_separator('-');
 }
 
 static bool graphical_session_available(void)
@@ -123,7 +230,226 @@ static void reap_browser(pid_t *browser_child)
     }
 }
 
-static bool handle_control_line(char *line)
+static void report_test_result(const RunningTest *test, int status)
+{
+    if (WIFEXITED(status)) {
+        int exit_code = WEXITSTATUS(status);
+        if (exit_code == 0) {
+            printf("Test %u (%s) finished successfully.\n", test->test_id,
+                   test->name);
+        } else {
+            printf("Test %u (%s) finished with exit status %d.\n",
+                   test->test_id, test->name, exit_code);
+        }
+    } else if (WIFSIGNALED(status)) {
+        printf("Test %u (%s) stopped by signal %d.\n", test->test_id,
+               test->name, WTERMSIG(status));
+    } else {
+        printf("Test %u (%s) ended with an unrecognized process status.\n",
+               test->test_id, test->name);
+    }
+}
+
+static void reap_test(RunningTest *test)
+{
+    if (test == NULL || test->pid <= 0) {
+        return;
+    }
+    int status;
+    pid_t result;
+    do {
+        result = waitpid(test->pid, &status, WNOHANG);
+    } while (result < 0 && errno == EINTR);
+    if (result == test->pid) {
+        report_test_result(test, status);
+        test->pid = -1;
+        test->test_id = 0;
+        test->name = NULL;
+    } else if (result < 0 && errno == ECHILD) {
+        printf("Test %u process is no longer available to wait for.\n",
+               test->test_id);
+        test->pid = -1;
+        test->test_id = 0;
+        test->name = NULL;
+    }
+}
+
+static const char *test_name(unsigned int test_id)
+{
+    switch (test_id) {
+    case 1:
+        return "CPU load escalation";
+    case 2:
+        return "RAM allocation escalation";
+    default:
+        return "unknown test";
+    }
+}
+
+static void start_stress_test(unsigned int test_id, RunningTest *running_test)
+{
+    if (running_test->pid > 0) {
+        printf("Test %u (%s) is already running; wait for it to finish.\n",
+               running_test->test_id, running_test->name);
+        return;
+    }
+
+    const char *script = test_id == 1 ? "tests/cpu_escalation.sh"
+                                      : "tests/ram_escalation.sh";
+    char *arguments[] = {(char *)script, NULL};
+    printf("\nLaunching Test %u: %s\n", test_id, test_name(test_id));
+    (void)fflush(stdout);
+    posix_spawnattr_t attributes;
+    posix_spawn_file_actions_t file_actions;
+    int result = posix_spawnattr_init(&attributes);
+    if (result != 0) {
+        fprintf(stderr, "Could not prepare test process: %s\n",
+                strerror(result));
+        return;
+    }
+    /* Give the script and its stress-ng child a group that shutdown can signal. */
+    result = posix_spawnattr_setpgroup(&attributes, 0);
+    if (result == 0) {
+        result = posix_spawnattr_setflags(&attributes, POSIX_SPAWN_SETPGROUP);
+    }
+    bool actions_initialized = false;
+    if (result == 0) {
+        result = posix_spawn_file_actions_init(&file_actions);
+        actions_initialized = result == 0;
+    }
+    /* Keep keyboard commands with the monitor, not the test script. */
+    if (result == 0) {
+        result = posix_spawn_file_actions_addopen(&file_actions, STDIN_FILENO,
+                                                  "/dev/null", O_RDONLY, 0);
+    }
+
+    pid_t child = -1;
+    if (result == 0) {
+        result = posix_spawn(&child, script, &file_actions, &attributes,
+                             arguments, environ);
+    }
+    if (actions_initialized) {
+        (void)posix_spawn_file_actions_destroy(&file_actions);
+    }
+    (void)posix_spawnattr_destroy(&attributes);
+    if (result != 0) {
+        if (result == ENOENT || result == EACCES) {
+            fprintf(stderr, "Could not start %s at %s.\n",
+                    test_name(test_id), script);
+            fputs("  Run the monitor from the project directory and check\n"
+                  "  that the test script is executable.\n", stderr);
+        } else {
+            fprintf(stderr, "Could not start %s: %s\n", test_name(test_id),
+                    strerror(result));
+        }
+        return;
+    }
+
+    running_test->pid = child;
+    running_test->test_id = test_id;
+    running_test->name = test_name(test_id);
+    printf("  Status  : Running (process %ld)\n", (long)child);
+    puts("  Monitor sampling and LED updates continue.");
+    puts("  Test output follows.\n");
+}
+
+static void stop_running_test(RunningTest *test)
+{
+    if (test == NULL || test->pid <= 0) {
+        return;
+    }
+
+    pid_t child = test->pid;
+    printf("\nShutdown requested while Test %u (%s) is running.\n",
+           test->test_id, test->name);
+    puts("  Sending SIGTERM to the test process group.");
+    if (kill(-child, SIGTERM) < 0 && errno != ESRCH) {
+        fprintf(stderr, "Could not send SIGTERM to test process group: %s\n",
+                strerror(errno));
+    }
+
+    for (unsigned int attempt = 0; attempt < 50; ++attempt) {
+        int status;
+        pid_t result = waitpid(child, &status, WNOHANG);
+        if (result == child) {
+            report_test_result(test, status);
+            test->pid = -1;
+            test->test_id = 0;
+            test->name = NULL;
+            return;
+        }
+        if (result < 0 && errno == ECHILD) {
+            test->pid = -1;
+            test->test_id = 0;
+            test->name = NULL;
+            return;
+        }
+        if (result < 0 && errno != EINTR) {
+            fprintf(stderr, "Could not wait for test process: %s\n",
+                    strerror(errno));
+            break;
+        }
+        struct timespec pause = {.tv_sec = 0, .tv_nsec = 100000000};
+        while (nanosleep(&pause, &pause) < 0 && errno == EINTR) {
+        }
+    }
+
+    puts("Test is still running after 5 seconds.");
+    puts("  Sending SIGKILL to the test process group.");
+    if (kill(-child, SIGKILL) < 0 && errno != ESRCH) {
+        fprintf(stderr, "Could not send SIGKILL to test process group: %s\n",
+                strerror(errno));
+    }
+    int status;
+    pid_t result;
+    do {
+        result = waitpid(child, &status, 0);
+    } while (result < 0 && errno == EINTR);
+    if (result == child) {
+        report_test_result(test, status);
+    } else {
+        fprintf(stderr, "Could not reap test process: %s\n", strerror(errno));
+    }
+    test->pid = -1;
+    test->test_id = 0;
+    test->name = NULL;
+}
+
+static void print_manual_test_steps(unsigned int test_id)
+{
+    switch (test_id) {
+    case 3:
+        putchar('\n'); print_separator('-');
+        puts("TEST 3 - HEALTHY BASELINE");
+        print_wrapped("Leave stress programs closed and watch the dashboard for several samples.", 2);
+        print_wrapped("Confirm CPU, memory, and root filesystem are below their warning thresholds and status is HEALTHY.", 2);
+        print_wrapped("The warning LED should be off. Full criteria: docs/test-cases.md.", 2);
+        print_separator('-');
+        break;
+    case 4:
+        putchar('\n'); print_separator('-');
+        puts("TEST 4 - RECOVERY AFTER STRESS");
+        print_wrapped("Use test 1, then let its full sequence finish while watching the dashboard.", 2);
+        print_wrapped("Observe CPU use fall and status return to HEALTHY once every available metric is below threshold.", 2);
+        print_wrapped("The warning LED should turn off when status recovers. Results depend on thresholds and measurements.", 2);
+        print_wrapped("Full criteria: docs/test-cases.md.", 2);
+        print_separator('-');
+        break;
+    case 5:
+        putchar('\n'); print_separator('-');
+        puts("TEST 5 - FILESYSTEM VERIFICATION");
+        print_wrapped("Run df -h / in another terminal and compare its Used/Size reading with the dashboard.", 2);
+        print_wrapped("Do not create files or fill the SD card. Small differences are expected from rounding and timing.", 2);
+        print_wrapped("Full criteria: docs/test-cases.md.", 2);
+        print_separator('-');
+        break;
+    default:
+        break;
+    }
+}
+
+static bool handle_control_line(char *line, bool *test_menu_open,
+                                RunningTest *running_test)
 {
     char *command = line;
     while (isspace((unsigned char)*command)) {
@@ -135,8 +461,20 @@ static bool handle_control_line(char *line)
     }
     if (strcmp(command, "h") == 0) {
         print_control_help();
+    } else if (strcmp(command, "t") == 0) {
+        print_test_menu();
+        *test_menu_open = true;
     } else if (strcmp(command, "q") == 0) {
         stop_requested = 1;
+    } else if (*test_menu_open && command[0] >= '1' && command[0] <= '5' &&
+               command[1] == '\0') {
+        unsigned int test_id = (unsigned int)(command[0] - '0');
+        *test_menu_open = false;
+        if (test_id <= 2) {
+            start_stress_test(test_id, running_test);
+        } else {
+            print_manual_test_steps(test_id);
+        }
     } else if (command[0] != '\0') {
         printf("Unknown command: %s\n", command);
         print_control_help();
@@ -147,7 +485,9 @@ static bool handle_control_line(char *line)
 /* Poll stdin until the next sample deadline; completed terminal lines are
  * available after Enter when the terminal is in its normal canonical mode. */
 static int wait_for_input_or_timeout(unsigned int seconds, bool *input_open,
-                                     pid_t *browser_child)
+                                     pid_t *browser_child,
+                                     bool *test_menu_open,
+                                     RunningTest *running_test)
 {
     struct timespec deadline;
     if (clock_gettime(CLOCK_MONOTONIC, &deadline) < 0) {
@@ -160,6 +500,7 @@ static int wait_for_input_or_timeout(unsigned int seconds, bool *input_open,
     bool discard_line = false;
     while (!stop_requested) {
         reap_browser(browser_child);
+        reap_test(running_test);
         struct timespec now;
         if (clock_gettime(CLOCK_MONOTONIC, &now) < 0) {
             return -1;
@@ -178,6 +519,10 @@ static int wait_for_input_or_timeout(unsigned int seconds, bool *input_open,
                                (remaining_nanoseconds + 999999L) / 1000000L;
         if (timeout_ms > INT_MAX) {
             timeout_ms = INT_MAX;
+        }
+        /* Check child completion regularly without adding another thread. */
+        if (timeout_ms > 500) {
+            timeout_ms = 500;
         }
 
         struct pollfd input = {
@@ -215,7 +560,8 @@ static int wait_for_input_or_timeout(unsigned int seconds, bool *input_open,
                     if (byte == '\n' || byte == '\r') {
                         if (!discard_line) {
                             line[line_length] = '\0';
-                            if (!handle_control_line(line)) {
+                            if (!handle_control_line(line, test_menu_open,
+                                                     running_test)) {
                                 return 0;
                             }
                         } else {
@@ -444,6 +790,8 @@ int main(int argc, char **argv)
     print_startup_banner(host, port);
     pid_t browser_child = launch_browser(dashboard_url);
     bool input_open = true;
+    bool test_menu_open = false;
+    RunningTest running_test = {.pid = -1, .test_id = 0, .name = NULL};
 
     CpuSampleState cpu_state = {0};
     while (!stop_requested) {
@@ -480,7 +828,8 @@ int main(int argc, char **argv)
         }
         if (stop_requested ||
             wait_for_input_or_timeout(interval_seconds, &input_open,
-                                      &browser_child) < 0) {
+                                      &browser_child, &test_menu_open,
+                                      &running_test) < 0) {
             if (!stop_requested) {
                 perror("Monitoring interval wait failed");
                 operation_failed = true;
@@ -489,6 +838,7 @@ int main(int argc, char **argv)
         }
     }
 
+    stop_running_test(&running_test);
     reap_browser(&browser_child);
     web_server_stop(&server);
     if (gpio_indicator_close(&indicator, gpio_error, sizeof(gpio_error)) < 0) {

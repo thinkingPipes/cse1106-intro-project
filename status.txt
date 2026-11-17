@@ -1,7 +1,11 @@
 Project: Raspberry Pi Equipment Health Monitor
-Status: C11 CPU/RAM/root-filesystem monitor with GPIO 17 and CSV logging;
-        embedded CivetWeb HTTP server and JSON API added in Milestone 1.
-Web: Static placeholder assets are served from web/; no finished dashboard yet.
-API: GET /api/health and GET /api/metrics. Default bind is 127.0.0.1:8080.
-Build: make requires libgpiod and CivetWeb development packages via pkg-config.
-Tests: make test does not require either web server or physical GPIO libraries.
+Status: C11 CPU, memory, and root-filesystem monitor with GPIO 17, optional CSV
+        logging, an embedded CivetWeb server, and an interactive CLI launcher.
+Web: Responsive dashboard served from web/; charts contain browser-session
+     samples, while the API provides current metrics and optional CSV history.
+API: GET /api/health, /api/metrics, and /api/history. Default bind is
+     127.0.0.1:8080; LAN access is opt-in with --host 0.0.0.0.
+CLI: h shows help, t opens five documented hardware tests, q shuts down.
+Build: make uses libgpiod and CivetWeb development files; CivetWeb pkg-config
+       metadata is optional when its system header and library are installed.
+Tests: make test uses mock GPIO and does not require CivetWeb or hardware.
